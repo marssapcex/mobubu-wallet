@@ -1,0 +1,39 @@
+{
+  "manifest_version": 3,
+  "name": "Obsidian - The Monero Privacy Wallet",
+  "version": "1.0.0",
+  "description": "MetaMask-familiar Web3 browser extension for Monero with Tor routing, built-in swaps, full-node sync, and real-time Privacy Posture Meter.",
+  "icons": {
+    "16": "icon16.png",
+    "48": "icon48.png",
+    "128": "icon128.png"
+  },
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "Obsidian Monero Wallet",
+    "default_icon": {
+      "16": "icon16.png",
+      "48": "icon48.png",
+      "128": "icon128.png"
+    }
+  },
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["content.js"],
+      "run_at": "document_start"
+    }
+  ],
+  "permissions": [
+    "storage",
+    "alarms"
+  ],
+  "host_permissions": [
+    "http://*/*",
+    "https://*/*"
+  ]
+}
