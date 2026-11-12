@@ -131,8 +131,15 @@ So the implementation has exactly two shapes:
 Panoptic chose neither: their paper says everlasting options "rely on oracles and
 the constant rebalancing may be expensive to execute on-chain", so they priced a
 **different, observable cash flow** — Uniswap LP fees ("streamia") — and gave up
-being this instrument. That is not a dodge; it is the correct response to O5,
-and it is why the 2021 object is still unshipped.
+being this instrument.
+
+> **Correction (see `ERRATA.md`).** An earlier version of this file said the 2021
+> object "is still unshipped". That is false: Deri shipped it in 2021 with
+> per-second funding, Everstrike shipped a CLOB variant in 2023 with a floating
+> strike, Panoptic ships streamia, and AmPO (SIAM J. Financial Math 17(3), 2026)
+> prices a different claim. Also, continuous funding — presented below as my first
+> addition — was proposed by Deri in 2021. What remains mine is the measurement
+> and the O4 argument, not the continuous accrual.
 
 ## The three death vectors
 
@@ -171,7 +178,8 @@ mints its own rungs.
 **FAIL** — as a standalone protocol, and the failure is O5, not the math. The
 2021 instrument is correctly priced only against a vanilla term structure that
 does not exist on-chain; without it, the funding law has a free parameter and
-therefore no discipline. Two of my three additions (continuous accrual, full
+therefore no discipline — and the four deployments in `ERRATA.md` show each team
+escaping that same problem by giving up the law, the maturity, or the volume. Two of my three additions (continuous accrual, full
 collateralisation) are real, cheap, and worth shipping **inside an options venue
 that already has a ladder** — where they would be the first liquidation-free
 perpetual option. Building the venue first and the instrument second is a
