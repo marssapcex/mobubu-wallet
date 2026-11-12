@@ -1,5 +1,10 @@
 # CONTINUUM — the buffer-rent market
 
+> **Novelty, stated narrowly:** see [`PRIOR-ART.md`](PRIOR-ART.md). Zero-liquidation
+> lending exists since Sardon (2021) and soft liquidation since LLAMMA (2023);
+> what is left to claim here is the debt-denominated purchase price, the rent
+> charged against the surplus only, and the machine-checked emptiness result.
+>
 > **Shipping code:** [`protocol/`](protocol/README.md) is the deployable market —
 > `ContinuumMarket.sol`, lender shares, oracle adapters, a deploy script and an
 > audit pack. Everything below documents the *research* prototype: the mechanism,
