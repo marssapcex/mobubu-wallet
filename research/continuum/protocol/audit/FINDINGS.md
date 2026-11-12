@@ -239,3 +239,67 @@ ship quietly.
 5. **Liquidity promises.** `withdraw` reverts rather than queue. Confirm that
    front-ends do not present shares as instantly redeemable; that is a
    communication failure with real bank-run consequences.
+
+---
+
+# F15 — `writeOff` is a permissionless irreversibility switch on a spot price
+
+**Severity:** Medium-High. **Status:** open, design decision required before audit.
+
+Found while reading the contract end-to-end for the pre-audit gap list, not by a
+harness: the harnesses exercise `writeOff` as a *tail* outcome, never as a
+*timing choice*.
+
+## The mechanism
+
+`writeOff(who)` requires only `V < debt` at the current spot mark, and it:
+
+1. seizes **all** of the position's collateral into inventory at the mark,
+2. erases the entire debt,
+3. books `shortfall = D − V` against every lender at once.
+
+It is callable by anyone, at any time, with no prior condition — not "the flow
+has been exhausted", not "the breach has lasted N blocks", not "the position is
+still underwater on the next observation". One call, irreversible.
+
+## Why that is a defect and not a feature
+
+The paper's framing — "a price gap is realised immediately, so `assets()` never
+overstates" — is about *what* happens, and that part is right. It says nothing
+about *when*, and the timing is chosen by whoever calls first.
+
+A borrower whose position is underwater on a one-block wick therefore has their
+collateral converted into a realised loss for the pool at the bottom of that
+wick, even if the mark recovers in the next block. Two things are destroyed at
+once: the borrower's recovery option, and the pool's recovery (the flow would
+have bought the debt at par against the same collateral, which is strictly the
+better trade while `V` is near `D`). The griefing party needs no capital and
+takes no position; whoever is short the collateral off-chain — or simply anyone
+who dislikes the borrower — profits from forcing the realisation.
+
+`pokable` equality does not save this: `_materialise` repairs *gradually* and
+only while cash exists, whereas `writeOff` jumps straight to the end state.
+
+## The three candidate fixes, all cheap
+
+| fix | change | cost |
+|---|---|---|
+| **Breach persistence** | store `breachSince` when `_materialise` sees `V < debt`; require `now − breachSince ≥ BREACH_GRACE` | 1 slot, ~20k gas on first breach |
+| **Second observation** | require the previous `_materialise` to have also been underwater | 1 bit in the packed slot |
+| **Flow-first** | require the flow to be unable to act (no cash, or `bid < rho`, or gap closed) | no new storage |
+
+The third is the cheapest and the most defensible: `writeOff` then means "the
+mechanism tried and could not", rather than "somebody chose the worst moment".
+It must be combined with the first, because a pool with cash and a wide spread
+would otherwise never realise a loss and `assets()` would overstate for as long
+as the print stays low — which is the F9 class of problem again.
+
+**Recommended:** flow-first **and** grace. Grace must be denominated in blocks,
+not seconds, so a sequencer outage cannot age a breach.
+
+## Why this is listed as open rather than fixed
+
+Every fix above adds a term to the transition relation that the Lean and SMT
+specifications do not have. Changing the code without changing the model is how
+the round-2 `rateDebt` bug happened (F10). The spec, the proofs, and the code
+have to move together, and that is a deliberate batch of work, not a patch.
