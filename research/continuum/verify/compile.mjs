@@ -20,7 +20,7 @@ function walk(dir, acc = []) {
   }
   return acc;
 }
-const targets = [...walk("src"), ...walk("test")].sort();
+const targets = [...walk("src"), ...walk("test"), ...walk("protocol/src"), ...walk("protocol/test"), ...walk("protocol/script")].sort();
 const sources = {};
 for (const t of targets) sources[t] = { content: fs.readFileSync(path.join(root, t), "utf8") };
 

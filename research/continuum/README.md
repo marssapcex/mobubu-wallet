@@ -1,5 +1,11 @@
 # CONTINUUM — the buffer-rent market
 
+> **Shipping code:** [`protocol/`](protocol/README.md) is the deployable market —
+> `ContinuumMarket.sol`, lender shares, oracle adapters, a deploy script and an
+> audit pack. Everything below documents the *research* prototype: the mechanism,
+> the proofs, and the prototype that made them testable. The prototype is not for
+> deployment; `protocol/` is.
+
 **A mechanism that deletes the liquidation event by turning it into a funding rate.**
 
 📄 **Whitepaper (PDF, 14 pages, academic format): [`whitepaper/Continuum-Whitepaper.pdf`](whitepaper/Continuum-Whitepaper.pdf)**

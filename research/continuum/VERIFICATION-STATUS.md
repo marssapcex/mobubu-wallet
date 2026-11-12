@@ -11,6 +11,10 @@ document.
 | `src/Continuum.sol` | `solc 0.8.24` via `verify/compile.mjs` (audit revision 3) | 0 errors, **7,213** deployed bytes |
 | `src/AaveV4Buffer.sol`, `src/AaveV4Math.sol`, `src/mocks/*` | same compiler | 0 errors; the Aave v4 integration and its fixtures compile |
 | `test/Continuum.t.sol` | same compiler, forge-std 1.9.7 | 0 errors; fuzz + handler + invariant suite compiles |
+| **`protocol/src/ContinuumMarket.sol`** | solc 0.8.24, no `viaIR` | 0 errors, **12,510** deployed bytes (fits the EIP-170 limit with 12 KB to spare) |
+| **`protocol/test/ContinuumMarket.t.sol`** | same compiler | 0 errors; 17 tests incl. two fuzz targets, forge-std only |
+| **`protocol/script/Deploy.sol`** | same compiler | 0 errors |
+| **shipping market, executed** | `verify/protocol.cjs`, 5 campaigns | all held: S accounting exact to 0 wei over 300 randomisations, 0 negative states, idempotent poke (delta 0), 0 sign-law violations in 120 rent updates, assets decomposition exact, bad debt booked exactly |
 | audit findings B1–B7 | `verify/audit.cjs` | **8/8** regressions held (double count, O(1) `setRho`, one-wei ask, reopen, rent forfeiture, scale, limit cycle) |
 | buffer vs liquidation, on Aave v4's own arithmetic | `verify/aave.cjs` | HF min 1.3077 with the buffer vs 0.9143 without; $7.48 rent vs $820 bonus on the same deleverage; tail writes off 100% of NAV |
 | invariant P1 — buffer line `V ≥ c·D` preserved | `verify/run.cjs` campaign A | 1,000 randomised `(mark, dt, rent)` steps, **0 violations** |
@@ -91,6 +95,7 @@ node compile.mjs          # compile all of src/ and test/
 npx hardhat run run.cjs   # the five mechanism campaigns
 npx hardhat run audit.cjs  # B1-B7 regressions
 npx hardhat run aave.cjs   # buffer vs liquidation, on Aave v4's arithmetic
+npx hardhat run protocol.cjs  # the shipping market: 5 campaigns, invariants + tail
 ```
 
 With a real Foundry install instead:
