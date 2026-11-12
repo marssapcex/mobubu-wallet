@@ -8,8 +8,11 @@ document.
 
 | artefact | check | result |
 |---|---|---|
-| `src/Continuum.sol` | `solc 0.8.24` via `verify/compile.mjs` | 0 errors, 0 warnings at error severity, **4,902** deployed bytes |
+| `src/Continuum.sol` | `solc 0.8.24` via `verify/compile.mjs` (audit revision 3) | 0 errors, **7,213** deployed bytes |
+| `src/AaveV4Buffer.sol`, `src/AaveV4Math.sol`, `src/mocks/*` | same compiler | 0 errors; the Aave v4 integration and its fixtures compile |
 | `test/Continuum.t.sol` | same compiler, forge-std 1.9.7 | 0 errors; fuzz + handler + invariant suite compiles |
+| audit findings B1–B7 | `verify/audit.cjs` | **8/8** regressions held (double count, O(1) `setRho`, one-wei ask, reopen, rent forfeiture, scale, limit cycle) |
+| buffer vs liquidation, on Aave v4's own arithmetic | `verify/aave.cjs` | HF min 1.3077 with the buffer vs 0.9143 without; $7.48 rent vs $820 bonus on the same deleverage; tail writes off 100% of NAV |
 | invariant P1 — buffer line `V ≥ c·D` preserved | `verify/run.cjs` campaign A | 1,000 randomised `(mark, dt, rent)` steps, **0 violations** |
 | invariant P3 — `health > 1` always (liquidation predicate unreachable) | campaign A | **0 liquidatable states** |
 | invariant P2 — health strictly rises while distressed | campaign B | 400/400 distressed accruals strictly positive |
@@ -53,7 +56,7 @@ The `.smt2` files are auditable with any SMT-LIB2 front end:
 
 | artefact | status | why |
 |---|---|---|
-| `lean/Continuum.lean` | **written, never compiled** (content cross-validated by the SMT suite above) | no `lean`/`lake`/`elan` in the environment; `leanprover/lean4` and `elan` release assets are blocked at `release-assets.githubusercontent.com` (curl: `SSL_ERROR_SYSCALL`), so no toolchain could be bootstrapped. `npm` and `pypi` were tried and have no Lean 4 distribution. |
+| `lean/Continuum.lean` | **written, never compiled** (content cross-validated by the SMT suite above) | the toolchain is unreachable, and this was closed out properly this round: release assets fail at TLS on `release-assets.githubusercontent.com` under four separate routes (release URL, API asset id, ranged request, API-by-id); `codeload` works so `lean4` v4.9.0 **source** was fetched (22,768,229 B), but Lean is self-hosted and the stage-0 binary lives on the blocked host; `leanprover/lean4-stage0` does not exist; the whole PyPI simple index was scanned and no package ships the toolchain; the npm `lean4` package has zero versions. |
 | `incentive_compatibility` | **admitted, and false in general** | needs Mathlib `MeasureTheory`; and the statement fails outside the unlevered-underwriter assumption (death vector 6.1(d)). |
 | `continuous_liveness` | **not attempted** | needs the reals + topology + an ODE comparison lemma. Discrete shadow is proved and executed. |
 
@@ -84,8 +87,10 @@ npm i --no-audit solc@0.8.24 hardhat@^2 @nomicfoundation/hardhat-ethers@^3 ether
 mkdir -p lib && curl -sSL https://codeload.github.com/foundry-rs/forge-std/tar.gz/refs/tags/v1.9.7 \
   | tar xz -C lib && mv lib/forge-std-1.9.7 lib/forge-std
 
-node compile.mjs          # compile both sources
-npx hardhat run run.cjs   # execute the four property campaigns on a real EVM
+node compile.mjs          # compile all of src/ and test/
+npx hardhat run run.cjs   # the five mechanism campaigns
+npx hardhat run audit.cjs  # B1-B7 regressions
+npx hardhat run aave.cjs   # buffer vs liquidation, on Aave v4's arithmetic
 ```
 
 With a real Foundry install instead:

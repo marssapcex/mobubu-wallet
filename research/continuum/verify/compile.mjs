@@ -8,7 +8,19 @@ import path from "path";
 const here = path.dirname(new URL(import.meta.url).pathname);
 const root = path.resolve(here, "..");
 
-const targets = ["src/Continuum.sol", "test/Continuum.t.sol"];
+// every Solidity file under src/ and test/, so new modules cannot be left
+// out of the build by an out-of-date list
+import {readdirSync, statSync} from "node:fs";
+function walk(dir, acc = []) {
+  for (const e of readdirSync(path.join(root, dir))) {
+    const rel = path.join(dir, e);
+    const st = statSync(path.join(root, rel));
+    if (st.isDirectory()) walk(rel, acc);
+    else if (e.endsWith(".sol")) acc.push(rel);
+  }
+  return acc;
+}
+const targets = [...walk("src"), ...walk("test")].sort();
 const sources = {};
 for (const t of targets) sources[t] = { content: fs.readFileSync(path.join(root, t), "utf8") };
 
@@ -40,7 +52,7 @@ let fatal = false;
 for (const e of out.errors ?? []) {
   const tag = e.severity === "error" ? "ERROR" : "warn ";
   if (e.severity === "error") fatal = true;
-  console.log(`[${tag}] ${e.formattedMessage.split("\n")[0]}`);
+  console.log(`[${tag}] ${process.env.SOLC_FULL ? e.formattedMessage : e.formattedMessage.split("\n")[0]}`);
 }
 if (fatal) process.exit(1);
 
