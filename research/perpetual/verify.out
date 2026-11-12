@@ -1,0 +1,28 @@
+=== B.1 converges to the exponential strip as F grows ===
+F (payments/period)   ladder value    error vs exact   error/notional
+       1      40         50.6342        17.3264       57.755 bp       0.00 ppm tail
+       2      70         42.9949         9.6871       32.290 bp       0.00 ppm tail
+      24     730         34.2816         0.9738        3.246 bp       0.00 ppm tail
+     144    4330         33.4775         0.1697        0.566 bp       0.00 ppm tail
+    1440   43210         33.3258         0.0180        0.060 bp       0.00 ppm tail
+    8640  259210         33.3115         0.0037        0.012 bp       0.00 ppm tail
+exact (lam -> integral): 33.3078  vs 1-day ATM call: 37.5855
+
+=== PDE residual  0.5 sig^2 S^2 V_SS - lam (V - payoff) ===
+S=2400  lhs=0.4686  rhs=0.4635  residual=0.0051
+S=2700  lhs=100.3225  rhs=100.2395  residual=0.0830
+S=3000  lhs=11939.0881  rhs=12157.3457  residual=-218.2576
+S=3300  lhs=174.3921  rhs=173.6101  residual=0.7820
+S=3600  lhs=3.6161  rhs=2.2528  residual=1.3632
+
+=== prize for farming one funding instant (TV / F) ===
+F        instant payment    as bp of notional    annualised if farmed daily
+    1            33.3078             111.026 bp                 40524 bp
+   24             1.3878               4.626 bp                  1689 bp
+ 1440             0.0231               0.077 bp                    28 bp
+continuous accrual: payment is a rate, instant prize = 0, and a trader
+holding for eps receives eps*rate while bearing eps of the risk -- no free lunch.
+
+=== equivalent vanilla maturity of the everlasting (lambda = 1/day) ===
+value 33.3078 == vanilla with T = 0.002152 yr = 0.785 days  (period P = 1.000 day)
+one-day vanilla is 37.5855, 12.8% above the everlasting
