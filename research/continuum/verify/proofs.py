@@ -380,6 +380,40 @@ def build_theorems(b):
         tgt * D * k == V * (k + v),
     )
 
+    # --- T13 the clipped step law (B7 in the audit) --------------------------
+    #      rho' = clip(rho + clip(eta*z, +-cap), 0, rhoCap).  The demand book is a
+    #      step function of rho, so an unclipped eta-step limit-cycles across the
+    #      whole book. Three statements about the clipped law:
+    #      (a) from below the band, one step can never jump past the crossing;
+    #      (b) inside the band, one more step stays within one cap of it;
+    #      (c) the distance to the band falls by exactly the step taken, so the
+    #          approach is monotone and cannot oscillate before the band.
+    rho, rhoS, step, cap = (b.var(n, R) for n in ["rho", "rhoS", "step", "cap"])
+    thm(
+        "T13a",
+        "no overshoot from below: rho<=rhoS-cap ∧ 0<s<=cap => rho+s <= rhoS",
+        [cap > 0, rho <= rhoS - cap, step > 0, step <= cap],
+        rho + step <= rhoS,
+    )
+    thm(
+        "T13b",
+        "band invariance: |rho-rhoS|<=cap ∧ |s|<=cap => |rho+s-rhoS| <= 2cap",
+        [cap > 0, rho - rhoS <= cap, rhoS - rho <= cap, step <= cap, -cap <= step],
+        (rho + step - rhoS) <= 2 * cap,
+    )
+    thm(
+        "T13b2",
+        "band invariance, lower side",
+        [cap > 0, rho - rhoS <= cap, rhoS - rho <= cap, step <= cap, -cap <= step],
+        (rhoS - (rho + step)) <= 2 * cap,
+    )
+    thm(
+        "T13c",
+        "monotone approach: the distance to the band falls by exactly the step",
+        [cap > 0, rho < rhoS - cap, step > 0, step <= cap],
+        ((rhoS - cap) - (rho + step)) == ((rhoS - cap) - rho) - step,
+    )
+
     return out
 
 

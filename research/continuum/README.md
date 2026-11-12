@@ -1,5 +1,11 @@
 # CONTINUUM — the buffer-rent market
 
+> **Shipping code:** [`protocol/`](protocol/README.md) is the deployable market —
+> `ContinuumMarket.sol`, lender shares, oracle adapters, a deploy script and an
+> audit pack. Everything below documents the *research* prototype: the mechanism,
+> the proofs, and the prototype that made them testable. The prototype is not for
+> deployment; `protocol/` is.
+
 **A mechanism that deletes the liquidation event by turning it into a funding rate.**
 
 📄 **Whitepaper (PDF, 14 pages, academic format): [`whitepaper/Continuum-Whitepaper.pdf`](whitepaper/Continuum-Whitepaper.pdf)**
@@ -642,7 +648,49 @@ The three Phase-7 tests pass, so the word above is DEPLOY. But you asked for som
 
 So, stated precisely: **the search space is not empty — a mechanism passes A+B+C and passes the three Phase-7 tests — but if "industry-changing at the caliber of the perpetual swap" is a hard gate rather than an aspiration, then the honest answer is that I cannot find one under these constraints, and this is the best candidate rather than the answer.** The gap is not in the mechanism; it is in the participant class. A mechanism that needs an unlevered institutional balance sheet to work is a better liquidation engine, not a new asset class.
 
-What I would do next, in order: (1) fix the rent-book griefing in §6.2, which is a real DoS on borrower margin; (2) run an agent-based sim with levered and unlevered underwriters to find where 6.1(d) bites; (3) get the Lean file compiled by someone with a toolchain, since I could not; (4) take a legal opinion on the CDS characterisation before writing another line of Solidity.
+What I would do next, in order: (1) run an agent-based sim with levered and unlevered underwriters to find where 6.1(d) bites; (2) get the Lean file compiled by someone with a toolchain, since I could not (the four download routes are now closed out, see `AUDIT.md`); (3) take a legal opinion on the CDS characterisation before writing another line of Solidity.
+
+---
+
+## Phase 8 — audit revision 3, and the integration that found the bugs
+
+The contract in §5 was read, then *used*, and using it against a real lending
+market found four more defects than reading it did. Full log: **`AUDIT.md`**.
+
+The two that matter are not exploits. `B6`: the feedback step was computed on
+notional while every theorem is about a ratio, so `rho` saturated at the cap on
+the first call for any book above a few hundred dollars — the code was not the
+object the proofs were about. `B7`: the demand book is a step function of `rho`,
+so its slope is unbounded, and the unclipped step limit-cycled the rent between 0
+and the top bid on alternating calls. Both are fixed, both are pinned by a
+regression that runs, and the corrected law has its own theorem (`T13`: the
+iterate enters a band of width `rho_cap/64` and stays — measured amplitude
+0.00078/yr against a 0.00156/yr bucket).
+
+### Developed on Aave v4, not beside it
+
+`aave/aave-v4` was cloned and its liquidation path audited; the integration is
+arm's-length because v4 is BUSL-1.1. `src/AaveV4.sol` mirrors the real
+`ISpoke` surface, `src/AaveV4Math.sol` re-expresses the two functions that decide
+what a liquidation costs (`LiquidationLogic.sol:312`, `:795`), and
+`src/AaveV4Buffer.sol` runs the mechanism in front of a Spoke: the borrower opts
+in, anyone may `cover()` (a pure function of health factor and elapsed time, so
+it pays no keeper and a second call in the same block pays 0), the buffer repays
+Aave at par down to `hfTarget` while `HF < hfFloor`, and charges the pool's own
+`rho` for the cash.
+
+Measured on an EVM (`verify/aave.cjs`), same position, mark 1950 → 1600:
+
+| path | HF floor reached | cost |
+|---|---|---|
+| Aave alone | 0.9143 → liquidation fires | **$820** of collateral destroyed in one block |
+| Continuum buffer | never below 1.3077 | **$7.48** of rent over 56 days, plus a $5,200 loan the borrower still owes |
+
+The buffer does not make the $820 disappear; it converts a fee into a loan plus
+rent. That trade *is* the product, and it is why the rent is a price and not a
+governance parameter. The tail is measured too: at mark 400 against a $6,000
+pool, `writeOff` removes the whole 6,000 — 100% of NAV, no socialization, no
+insurance fund to raid.
 
 ---
 
@@ -650,12 +698,14 @@ What I would do next, in order: (1) fix the rent-book griefing in §6.2, which i
 
 | artefact | status |
 |---|---|
-| `src/Continuum.sol` | **compiled**, solc 0.8.24, 0 errors, 5,187 deployed bytes |
+| `src/Continuum.sol` | **compiled**, solc 0.8.24, 0 errors, 7,213 deployed bytes (audit revision 3) |
+| `src/AaveV4Buffer.sol` + `src/AaveV4Math.sol` | **compiled**; buffer measured against Aave v4's own liquidation arithmetic by `verify/aave.cjs` |
+| `verify/audit.cjs` | **executed**: 8/8 regressions for findings B1–B7 held |
 | `test/Continuum.t.sol` | **compiled** (fuzz + invariant + handler); `forge` binary unavailable in this environment, so the same properties were executed by `verify/run.cjs` on a Hardhat/EDR EVM instead |
 | `verify/run.cjs` | **executed**: 1,460 randomised steps, 0 invariant violations |
-| `verify/proofs.py` | **executed**: 18 SMT theorems proved by Z3 + cvc5 independently, 0 disagreements, 0 unknown, plus a 122,760-state exhaustive grid; 2 statements were falsified and corrected |
+| `verify/proofs.py` | **executed**: 23 SMT theorems proved by Z3 + cvc5 independently, 0 disagreements, 0 unknown, plus a 122,760-state exhaustive grid; 2 statements were falsified and corrected |
 | `verify/ode_study.py` | **executed**: ODE solved symbolically (sympy `dsolve`/`limit`), stability region and rent-cap tables generated |
-| `lean/Continuum.lean` | **written, NOT machine-checked** — no Lean toolchain reachable (`lean`/`lake` absent; `elan` bootstrap blocked at `release-assets.githubusercontent.com`). The *content* is cross-validated by the SMT suite; the *file* is not compiled |
+| `lean/Continuum.lean` | **written, NOT machine-checked** — the toolchain is unreachable and every route is now closed out: four download paths fail at TLS on `release-assets.githubusercontent.com`, `codeload` yields source only (no stage-0 to bootstrap from), `lean4-stage0` does not exist, the whole PyPI index has no Lean toolchain, and npm `lean4` has zero versions. The *content* is cross-validated by the SMT suite; the *file* is not compiled |
 | `incentive_compatibility` | **admitted** — requires Mathlib `MeasureTheory`; and false outside the unlevered-underwriter assumption. Do not treat as proved. |
 
 Claims in this document that are *not* backed by an artefact above are marked as argument, not proof: the no-cascade claim, the manipulation-cost argument in §6.2, and every DeFiLlama figure (read live on 2026-11-12, and they move).

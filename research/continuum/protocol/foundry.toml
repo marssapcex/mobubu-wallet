@@ -1,0 +1,16 @@
+[profile.default]
+src = "src"
+test = "test"
+script = "script"
+out = "out"
+libs = ["lib"]
+solc_version = "0.8.24"
+optimizer = true
+optimizer_runs = 200
+via_ir = false          # the code compiles without it, and the audit is easier without it
+fuzz = { runs = 2048 }
+invariant = { runs = 128, depth = 64, fail_on_revert = true }
+
+# Continuum-specific: the market must fit in one contract, so anything that
+# pushes it past 24 KB is a design smell, not a build setting.
+[profile.default.optimizer_details]
