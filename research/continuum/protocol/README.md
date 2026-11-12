@@ -47,10 +47,18 @@ that can break it is a price gap, which `writeOff` books immediately.
 ## Accounting identities
 
 ```
-assets() = cash + loans + inventoryValue()        (checked exactly in campaign D)
+assets()     = cash + loans + inventoryValue() + pendingRent()
+pendingRent() = unbookedRent + rateDebt()*elapsed/YEAR     <- keeps NAV honest with no keeper
 shares.price = assets() / shares.totalSupply()
-S(position) = V*WAD - c*debt                      (exact, WAD-scaled)
+S(position)  = V*WAD - c*debt                              (exact, WAD-scaled)
 ```
+
+`pendingRent` exists because the rent is accrued lazily per position: without it,
+`assets()` would understate what borrowers owe, and a depositor arriving after a
+long silence could buy in cheaply and capture other people's rent (finding F9).
+It is maintained in O(1) as `A + rho·M` — buckets below the rent are fixed at
+their edge, buckets above contribute the rent — so a rent move reclassifies at
+most one bucket.
 
 `loans` grows by rent (lender yield) and shrinks by repayment and deleverage.
 `inventory` grows only through deleverage, where the pool buys collateral at

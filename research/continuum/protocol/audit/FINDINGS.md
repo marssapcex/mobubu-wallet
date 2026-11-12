@@ -104,6 +104,96 @@ multisig. Not fixed here because it is a governance decision, not code.
 
 ---
 
+## Round 2 — findings F9 to F14 (audit continuation)
+
+### F9 — stale NAV let a fresh depositor capture rent that was not theirs · High · fixed
+
+The rent is accrued lazily per position: `loans` only grows when somebody calls
+`poke`. With no keeper — which is the design — nobody is *paid* to poke, so the
+book can sit unaccrued for months. `assets()` read `cash + loans + inventory`,
+so NAV understated what was owed, and a depositor who arrived after a long silence
+bought shares cheaply, poked, and exited with other people's rent.
+
+Measured before the fix (`verify/attack.cjs`, 180 idle days, 74,000 of debt):
+the attacker deposited 100,000 and redeemed 100,000 plus a share of the ~365 of
+accrued rent.
+
+**Fix:** an aggregate accrual that does not need a keeper.
+`rateMassAbove` / `rateMassFixed` maintain `rate = A + rho·M` in O(1), and
+
+```solidity
+assets() = cash + loans + inventoryValue() + pendingRent()
+pendingRent() = unbookedRent + rateDebt() * elapsed / YEAR
+```
+
+After the fix the same attack returns **0.000011 USDC** — rounding dust — and
+the incumbent lender's 100,000 shares are worth 100,364.93, which is exactly the
+rent they earned. A test now asserts the property directly:
+`test_sharePriceRisesWithoutAnyTransaction` requires NAV to rise with time alone,
+and to be unchanged by the poke that materialises it.
+
+### F10 — the first version of the fix was wrong, and the differential test caught it · High · fixed
+
+The first implementation recomputed all 64 buckets whenever `rho` moved (correct,
+212k gas). The "optimisation" that followed — adjusting only buckets whose upper
+edge lies between the old and new rent — was based on a wrong derivation: the
+rate per bucket is `min(rho, upper)`, so **every bucket above the rent** changes
+rate when the rent moves, not just the one being crossed. Measured drift:
+697,171,234 in `rateDebt` after 30 updates, i.e. NAV priced off a fiction.
+
+The drift was found by F14's differential check, not by reading the code. The fix
+is the `A + rho·M` split: buckets below the rent are fixed at their edge, buckets
+above contribute `rho`, so a rent move reclassifies exactly the one bucket it
+crosses. Drift after the fix: **0**.
+
+This is worth recording as a process fact: the second bug was introduced by the
+fix for the first, and only the invariant test caught it.
+
+### F11 — oracle reentrancy · checked, not exploitable
+
+`price()` is an external call made from inside `_materialise`, before `_syncBook`
+has run, and `poke` carries no `nonReentrant`. A hostile feed would therefore be
+able to run market code in the middle of an accrual.
+
+It cannot: `IOracle.price()` is declared **`view`**, so Solidity emits
+STATICCALL, and any state change inside the callback reverts in that static
+context, with the failure swallowed exactly as `_materialise` expects.
+`ReentrantOracle` is armed with `updateRho()` and the market is poked; the rent
+does not move. The `view` declaration is load-bearing security, and a future
+refactor that makes the oracle interface non-view (a proxy, an adapter that
+writes a cached price) would silently remove it.
+
+### F12 — the demand book must equal the positions · invariant, holding
+
+`coveredDebtStored` is maintained incrementally (`_book`, `_unbook`,
+`_relevelCovered`) and is what the rent law prices off. A differential check
+against a full recomputation from the positions, over 40 rent updates, shows a
+drift of **0**.
+
+### F13 — gas of the accrual aggregate · measured
+
+| call | gas |
+|---|---|
+| `poke` | 89,831 |
+| `updateRho` | 74,953 |
+| `deposit` | 93,243 |
+| `withdraw` | 84,851 |
+| `borrow` | 133,847 |
+
+`updateRho` was 212,409 while the aggregate was resynced over all 64 buckets, and
+it is back to 74,953 with the `A + rho·M` split. It is permissionless and unpaid,
+so 75k gas is the price of anyone who wants the rent to move.
+
+### F14 — rounding in the aggregate · bounded, 0 observed
+
+`rateMassFixed` is accumulated per position (`amount × edge / WAD`), while a
+reclassification moves a per-bucket quantity (`mass × edge / WAD`); the two can
+differ by one wei per position. Measured drift over 30 updates: **0**. The
+differential check stays in the harness so a future change that breaks it cannot
+ship quietly.
+
+---
+
 ## Regression map
 
 | finding | pinned by |
@@ -116,8 +206,21 @@ multisig. Not fixed here because it is a governance decision, not code.
 | F6 | `test_donationAttackDoesNotInflateShares` |
 | F7 | campaign C (bid priced out of the book once `rho` clears it) |
 | F8 | out of code scope |
+| F9 | `verify/attack.cjs` F9 (attack returns dust after the fix) + `test_sharePriceRisesWithoutAnyTransaction` |
+| F10 | `verify/attack.cjs` F14 (aggregate drift 0) |
+| F11 | `verify/attack.cjs` F11 (armed feed, rent unchanged) |
+| F12 | `verify/attack.cjs` F12 (book drift 0) |
+| F13 | `verify/attack.cjs` F13 (gas table) |
+| F14 | `verify/attack.cjs` F14 |
 
-## What an external auditor should attack first
+## What an external auditor should attack first (updated after round 2)
+
+0. **The claim that NAV is continuous.** `assets()` now contains an estimate of
+   accrued rent (`A + rho·M`). Try to make it lie in either direction: a position
+   whose rent cap binds (distress) accrues less than the estimate; a bucket edge
+   is used instead of the exact bid. Quantify the error and decide whether a
+   depositor can still time an entry.
+
 
 1. **Rounding in every path**, not just the two already found. The pattern that
    produced F1 and F2 is "floor a division, then compare" — look for it in

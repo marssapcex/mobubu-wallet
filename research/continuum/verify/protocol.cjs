@@ -198,12 +198,13 @@ async function main() {
     const cash = await market.cash();
     const loans = await market.loans();
     const invVal = await market.inventoryValue();
+    const pending = await market.pendingRent();
     const assets = await market.assets();
-    const sum = cash + loans + invVal;
+    const sum = cash + loans + invVal + pending;
     const supply = await sharesTok.totalSupply();
     const pricePerShare = await market.sharePrice();
     const check = (supply * pricePerShare) / WAD;
-    out.push(`D  accounting     assets ${f6(assets)} = cash ${f6(cash)} + loans ${f6(loans)} + inventory ${f6(invVal)} -> ${assets === sum}`);
+    out.push(`D  accounting     assets ${f6(assets)} = cash ${f6(cash)} + loans ${f6(loans)} + inventory ${f6(invVal)} + pending rent ${f6(pending)} -> ${assets === sum}`);
     out.push(`   shares         supply ${f6(supply)}, price ${f18(pricePerShare).toFixed(6)}, supply*price ${f6(check)} (assets ${f6(assets)})`);
     if (assets !== sum) fails.push("assets() does not decompose");
     const drift = check > assets ? check - assets : assets - check;

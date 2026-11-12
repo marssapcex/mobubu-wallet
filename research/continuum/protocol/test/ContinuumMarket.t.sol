@@ -80,7 +80,7 @@ contract ContinuumMarketTest is Test {
         assertGt(debt1, debt0, "rent must capitalise");
         assertApproxEqRel(debt1 - debt0, (debt0 * MIN_BID * 30 days) / (WAD * 365 days), 0.02e18, "rent size");
         // the rent is the lender's yield, not a fee to a third party
-        assertGt(market.assets(), assets0, "lenders earn the rent");
+        assertGe(market.assets(), assets0, "lenders earn the rent (it is recognised before the poke too)");
         assertEq(market.shares().totalSupply(), supply0, "no new shares for rent");
     }
 
@@ -216,11 +216,17 @@ contract ContinuumMarketTest is Test {
         assertGt(sharesOut, 1e6, "virtual offset must keep shares sane");
     }
 
-    function test_sharePriceIsMonotoneUnderRent() public {
+    /// @notice The point of the no-keeper design, stated as a test: NAV rises
+    ///         with time alone. Nobody pokes, nobody is paid, the share price
+    ///         still moves — and poking afterwards changes nothing, because the
+    ///         work was already accounted for (finding F9).
+    function test_sharePriceRisesWithoutAnyTransaction() public {
         uint256 p0 = market.sharePrice();
         vm.warp(block.timestamp + 365 days);
+        uint256 p1 = market.sharePrice();
+        assertGt(p1, p0, "rent accrual must raise the share price with zero transactions");
         market.poke(borrower);
-        assertGt(market.sharePrice(), p0, "rent accrual raises the share price");
+        assertEq(market.sharePrice(), p1, "poking must not move NAV: the rent was already counted");
     }
 
     // ================================================================== bid lock

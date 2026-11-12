@@ -85,6 +85,18 @@ contract ContinuumMarket {
 
     // ------------------------------------------------------------------ analytics
     uint256 public totalRent;
+    /// @notice Σ over the demand book of `rate × debt`, in debt units per year.
+    ///         The rent is accrued lazily per position, so `loans` only holds what
+    ///         has already been materialised; this aggregate is what makes
+    ///         `assets()` honest between materialisations (finding F9: a fresh
+    ///         depositor could otherwise buy in at a stale NAV and capture rent
+    ///         that was not theirs).
+    uint256 public rateMassAbove; // debt in buckets whose upper bid edge exceeds rho
+    uint256 public rateMassFixed; // Σ debt × upper(edge) / WAD for buckets at or below rho
+    /// @notice Rent that has accrued but is not yet capitalised into `loans`.
+    uint256 public unbookedRent;
+    /// @notice Timestamp at which `unbookedRent` was last rolled forward.
+    uint64 public lastRateUpdate;
     uint256 public totalDeleveraged;
     uint256 public totalWrittenOff;
     bool public borrowFrozen;
@@ -187,6 +199,7 @@ contract ContinuumMarket {
 
         shares = new ContinuumShares(q.shareName, q.shareSymbol, q.debtToken.decimals(), address(this));
         riskAdmin = msg.sender;
+        lastRateUpdate = uint64(block.timestamp);
         rho = q.minBid; // the law is two-sided; the floor is the demand side's own
     }
 
@@ -232,9 +245,28 @@ contract ContinuumMarket {
         return collateralValueOf(inventory, price());
     }
 
-    /// @notice Pool assets: idle cash + what borrowers owe + inventory at mark.
+    /// @notice Rent owed by borrowers but not yet materialised into `loans`.
+    /// @dev The rate per position is `min(rho, bid)`; the aggregate uses each
+    ///      bucket's **upper** edge, so it is a slight over-estimate and the
+    ///      error can only ever favour the pool on entry. Bounded by one bucket
+    ///      width of rate (rhoCap/64 = 15.6 bp/yr) times the elapsed time.
+    function pendingRent() public view returns (uint256) {
+        return unbookedRent + (rateDebt() * (block.timestamp - lastRateUpdate)) / YEAR;
+    }
+
+    /// @notice Aggregate rent rate of the book, in debt units per year.
+    /// @dev Split so it stays O(1): buckets whose upper bid edge is at or below
+    ///      the rent contribute a fixed amount (`rateMassFixed`); every bucket
+    ///      above it contributes `rho`. So `rate = A + rho·M`, and a rent move
+    ///      only reclassifies the one bucket it crosses.
+    function rateDebt() public view returns (uint256) {
+        return rateMassFixed + (rho * rateMassAbove) / WAD;
+    }
+
+    /// @notice Pool assets: idle cash + what borrowers owe + inventory at mark
+    ///         + rent owed but not yet booked.
     function assets() public view returns (uint256) {
-        return cash + loans + inventoryValue();
+        return cash + loans + inventoryValue() + pendingRent();
     }
 
     function sharePrice() external view returns (uint256) {
@@ -446,6 +478,7 @@ contract ContinuumMarket {
         if (next < minBid) next = minBid; // the rent can never be free
         if (next != old) {
             _relevelCovered(old, next);
+            _adjustRates(old, next);
             rho = next;
         }
         emit RentUpdated(next, z);
@@ -479,9 +512,12 @@ contract ContinuumMarket {
         uint256 capRent = BufferMath.rentCap(V, p.debt, c);
         if (rent > capRent) rent = capRent;
         if (rent > 0) {
+            _rollAccrual();
             p.debt += rent;
             loans += rent;
             totalRent += rent;
+            // it is on the books now, so it must leave the unbooked estimate
+            unbookedRent = rent >= unbookedRent ? 0 : unbookedRent - rent;
         }
     }
 
@@ -591,6 +627,59 @@ contract ContinuumMarket {
     //  Demand book — O(1) maintenance
     // =========================================================================
 
+    /// @dev Capitalise the live term into `unbookedRent`. Must run before any
+    ///      change to `rateDebt`, otherwise the elapsed time would be priced at
+    ///      the new rate instead of the one that was in force.
+    function _rollAccrual() internal {
+        uint256 dt = block.timestamp - lastRateUpdate;
+        if (dt > 0) unbookedRent += (rateDebt() * dt) / YEAR;
+        lastRateUpdate = uint64(block.timestamp);
+    }
+
+    /// @dev Upper edge of a bucket's bid range.
+    function _bucketUpper(uint256 b) internal view returns (uint256) {
+        return ((b + 1) * (rhoCap + 1)) / BUCKETS;
+    }
+
+    /// @dev Rent rate attributed to a bucket: the clearing rent, capped by the
+    ///      bucket's upper bid edge.
+    function _bucketRate(uint256 b) internal view returns (uint256) {
+        uint256 upper = _bucketUpper(b);
+        return rho < upper ? rho : upper;
+    }
+
+    /// @dev Reclassify the buckets the rent crossed, without walking the book.
+    ///      Moving up from `lo` to `hi`, a bucket whose upper edge lies in
+    ///      `(lo, hi]` stops being priced at `rho` and becomes fixed at its edge:
+    ///          b from lo*BUCKETS/(rhoCap+1) to hi*BUCKETS/(rhoCap+1), exclusive
+    ///      and because one step is capped at half a bucket, that window holds at
+    ///      most one bucket. `verify/attack.cjs` F14 checks the aggregate against
+    ///      a full recomputation after many updates.
+    function _adjustRates(uint256 oldRho, uint256 newRho) internal {
+        if (oldRho == newRho) return;
+        _rollAccrual();
+        uint256 lo = oldRho < newRho ? oldRho : newRho;
+        uint256 hi = oldRho < newRho ? newRho : oldRho;
+        uint256 b0 = (lo * BUCKETS) / (rhoCap + 1);
+        uint256 b1 = (hi * BUCKETS) / (rhoCap + 1);
+        if (b1 > BUCKETS) b1 = BUCKETS;
+        bool up = newRho > oldRho;
+        for (uint256 b = b0; b < b1; ++b) {
+            uint256 m = demandByBucket[b];
+            if (m == 0) continue;
+            uint256 fixedPart = (m * _bucketUpper(b)) / WAD;
+            if (up) {
+                // leaves the floating mass, becomes fixed at its edge
+                rateMassAbove = m > rateMassAbove ? 0 : rateMassAbove - m;
+                rateMassFixed += fixedPart;
+            } else {
+                // falls back under the rent, becomes floating again
+                rateMassAbove += m;
+                rateMassFixed = fixedPart > rateMassFixed ? 0 : rateMassFixed - fixedPart;
+            }
+        }
+    }
+
     function _ceilDiv(uint256 a, uint256 b) internal pure returns (uint256) {
         return a == 0 ? 0 : (a - 1) / b + 1;
     }
@@ -602,16 +691,26 @@ contract ContinuumMarket {
     function _book(address who, uint256 amount) internal {
         if (amount == 0) return;
         uint256 b = bucketOf(_pos[who].bookBid);
+        _rollAccrual();
         demandByBucket[b] += amount;
+        if (_bucketUpper(b) <= rho) rateMassFixed += (amount * _bucketUpper(b)) / WAD;
+        else rateMassAbove += amount;
         if (_bucketCovered(b, rho)) coveredDebtStored += amount;
     }
 
     function _unbook(address who, uint256 amount) internal {
         if (amount == 0) return;
         uint256 b = bucketOf(_pos[who].bookBid);
+        _rollAccrual();
         uint256 cur = demandByBucket[b];
         uint256 cut = amount > cur ? cur : amount;
         demandByBucket[b] = cur - cut;
+        if (_bucketUpper(b) <= rho) {
+            uint256 fixedCut = (cut * _bucketUpper(b)) / WAD;
+            rateMassFixed = fixedCut > rateMassFixed ? 0 : rateMassFixed - fixedCut;
+        } else {
+            rateMassAbove = cut > rateMassAbove ? 0 : rateMassAbove - cut;
+        }
         if (_bucketCovered(b, rho)) {
             uint256 cov = coveredDebtStored;
             coveredDebtStored = cut > cov ? 0 : cov - cut;
