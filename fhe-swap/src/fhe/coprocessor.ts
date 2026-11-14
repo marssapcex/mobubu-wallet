@@ -53,13 +53,13 @@ export class CoprocessorNode {
   public readonly nodeId: string;
   private evaluator: TfheEvaluator | null = null;
   private params: TfheParams | null = null;
+  private votedNullifiers = new Set<string>();
 
   constructor(nodeId?: string) {
     this.nodeId = nodeId ?? `coproc-${Date.now()}`;
   }
 
   async init(cloudKeyPath: string): Promise<void> {
-    // Tạo evaluator với C++ worker backend (sau này có thể swap bằng TFHE-rs)
     const { crypto } = await import("./tfhe.js").then((m) =>
       m.makeTfhe({
         role: "evaluator",
@@ -72,7 +72,7 @@ export class CoprocessorNode {
     }
     this.evaluator = crypto;
     this.params = this.evaluator.params();
-    console.log(`[Coprocessor ${this.nodeId}] initialized, params:`, this.params);
+    console.log(`[Coprocessor ${this.nodeId}] initialized, params:`, JSON.stringify(this.params));
   }
 
   /**
@@ -83,7 +83,7 @@ export class CoprocessorNode {
   async checkBalance(
     encryptedBalance: EncryptedInt,
     withdrawAmount: bigint,
-  ): Promise<boolean> {
+  ): Promise<EncryptedInt> {
     if (!this.evaluator) throw new Error("evaluator not initialized");
 
     // Mã hóa withdrawAmount thành ciphertext cùng width
@@ -96,12 +96,7 @@ export class CoprocessorNode {
       "ge",
     );
 
-    // Giải mã kết quả boolean (cần client hoặc threshold decrypt)
-    // Ở coprocessor, ta không có secret key → không giải mã được.
-    // Thay vào đó, trả về encrypted boolean để client/validator tập trung decrypt.
-    // Để đơn giản trong luồng hybrid: client đã biết balance, coprocessor chỉ
-    // xác nhận cấu trúc ciphertext hợp lệ và ký "đã kiểm tra FHE".
-    return true; // structural check passed; real decryption done by client/ZK
+    return result; // Trả về encrypted boolean, client/validator tập trung decrypt
   }
 
   /**
@@ -109,9 +104,17 @@ export class CoprocessorNode {
    * Trong production dùng FROST/BLS threshold signature.
    */
   signVote(nullifierHash: string, valid: boolean): string {
+    if (this.votedNullifiers.has(nullifierHash)) {
+      throw new Error(`Coprocessor ${this.nodeId} already voted for ${nullifierHash}`);
+    }
+    this.votedNullifiers.add(nullifierHash);
+
     const payload = `${this.nodeId}:${nullifierHash}:${valid}:${Date.now()}`;
-    // Placeholder: thay bằng threshold signature thật (FROST/BLS)
     return Buffer.from(payload).toString("hex");
+  }
+
+  hasVoted(nullifierHash: string): boolean {
+    return this.votedNullifiers.has(nullifierHash);
   }
 }
 
@@ -120,7 +123,7 @@ export class CoprocessorNode {
  */
 export class CoprocessorNetwork {
   private nodes: CoprocessorNode[] = [];
-  private votes = new Map<string, { valid: boolean; nodeId: string }[]>();
+  private votes = new Map<string, { valid: boolean; nodeId: string; timestamp: number }[]>();
   public readonly threshold: number;
 
   constructor(threshold: number) {
@@ -141,7 +144,7 @@ export class CoprocessorNetwork {
     if (!this.votes.has(nullifierHash)) {
       this.votes.set(nullifierHash, []);
     }
-    this.votes.get(nullifierHash)!.push({ valid, nodeId });
+    this.votes.get(nullifierHash)!.push({ valid, nodeId, timestamp: Date.now() });
   }
 
   isThresholdMet(nullifierHash: string): boolean {
@@ -162,6 +165,10 @@ export class CoprocessorNetwork {
       votes: validVotes,
       total: nodeVotes.length,
     };
+  }
+
+  getNodeCount(): number {
+    return this.nodes.length;
   }
 }
 

@@ -106,6 +106,10 @@ async function decryptNumber(
   return BigInt(payload);
 }
 
+/**
+ * Mock AnonymousVault state (in-memory) mô phỏng hành vi Solidity contract thật.
+ * Trong production đây là Solidity contract trên chain.
+ */
 class MockAnonymousVault {
   spentNullifiers = new Set<string>();
   existingCommitments = new Set<string>();
@@ -188,12 +192,12 @@ describe("Anonymous cross-chain withdrawal (Coprocessor + ZK + FHE 16-bit)", () 
     const kgPayload = await worker.raw("KEYGEN", "128", ck);
     assert.ok(kgPayload.startsWith("client 128 "), kgPayload);
 
-    const depositAmount = 10_000_000n; // 10 triệu đơn vị (vượt quá 65535, chia chunk 16-bit nếu cần; test dùng giá trị nhỏ hơn cho FHE)
     const fheDepositAmount = 50_000n; // dưới 65535, đủ cho 16-bit FHE
 
     const encBlob = await encryptNumber(worker, fheDepositAmount, 16);
     assert.ok(encBlob.length > 0);
 
+    // Tạo note (tương tự Tornado Cash)
     const secret = toHex("user_secret_12345");
     const nullifier = toHex("user_secret_12345_nullifier");
     const commitment = toHex(`commitment:${nullifier}:${secret}`);
@@ -213,8 +217,6 @@ describe("Anonymous cross-chain withdrawal (Coprocessor + ZK + FHE 16-bit)", () 
 
     // Simulate CoprocessorNode usage
     const coproc = new CoprocessorNode("test-node-1");
-    // Gán evaluator đã có cloud key (để test isolate, ta dùng evalWorker trực tiếp)
-    // Trong production CoprocessorNode.init() sẽ tự load cloud key
 
     const withdrawAmount = 30_000n; // <= 50,000 (dưới 16-bit limit)
     const recipient = "0xAnonymousRecipientAddress";
@@ -228,6 +230,7 @@ describe("Anonymous cross-chain withdrawal (Coprocessor + ZK + FHE 16-bit)", () 
       encBlob,
       encWithdrawBlob
     );
+    // CMP trả về encrypted boolean (width 1). Client giải mã để biết kết quả.
     const cmpToks = cmpPayload.split(" ");
     const cmpWidth = Number(cmpToks[0]);
     const cmpBlob = cmpToks[1];
@@ -324,5 +327,12 @@ describe("Anonymous cross-chain withdrawal (Coprocessor + ZK + FHE 16-bit)", () 
     assert.equal(consensus.valid, true);
     assert.equal(consensus.votes, 2);
     assert.equal(consensus.total, 2);
+    assert.equal(network.getNodeCount(), 3);
+  });
+
+  it("CoprocessorNode rejects double vote", () => {
+    const node = new CoprocessorNode("test-node");
+    assert.equal(node.signVote("0xhash1", true), node.signVote("0xhash2", true) ? "should throw" : "ok");
+    assert.throws(() => node.signVote("0xhash1", true), /already voted/);
   });
 });

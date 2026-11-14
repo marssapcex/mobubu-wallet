@@ -1,5 +1,5 @@
 /**
- * @title Client SDK — Anonymous Cross-Chain Vault (REAL, not mock)
+ * @title Client SDK — Anonymous Cross-Chain Vault (REAL)
  * @dev Client-side logic:
  *   1. Kết nối ví, sinh ephemeral key pair khi nạp
  *   2. Tạo note = {nullifier, secret, commitment, nullifierHash, encryptedAmountFHE}
@@ -25,9 +25,9 @@ export interface WithdrawParams {
   recipient: string;
   amount: bigint;
   note: Note;
-  zkProof: any;
-  thresholdSigs: any;
   root: string;
+  pathElements: string[];
+  pathIndices: number[];
 }
 
 export interface Note {
@@ -71,8 +71,8 @@ export function generateEphemeralKeys(): { secret: string; publicKey: string } {
 
 /**
  * Tạo note sau khi nạp.
- * commitment = Poseidon(nullifier, secret)
- * nullifierHash = Poseidon(nullifier)
+ * commitment = Poseidon(nullifier, secret) — KHỚP CIRCUIT
+ * nullifierHash = Poseidon(nullifier) — KHỚP CIRCUIT
  * encryptedAmountFHE = FHE.encrypt(networkPublicKey, amount)
  */
 export async function createNote(
@@ -112,14 +112,14 @@ export async function createNote(
 
 /**
  * Sinh ZK-SNARK proof thật bằng snarkjs groth16.
- * Trong production, input JSON phải chứa tất cả private inputs:
- *   { nullifier, secret, pathElements, pathIndices, noteAmount, root, nullifierHash, commitment }
+ * Input JSON phải chứa tất cả private inputs:
+ *   { nullifier, secret, pathElements, pathIndices, noteAmount, root, nullifierHash, commitment, recipient, relayer, fee, amount }
  */
 export async function proveWithdrawal(
   wasmPath: string,
   zkeyPath: string,
-  input: any
-): Promise<{ proof: any; publicSignals: any[] }> {
+  input: Record<string, any>
+): Promise<{ proof: any; publicSignals: string[] }> {
   const { proof, publicSignals } = await snarkjs.groth16.fullProve(
     input,
     wasmPath,
@@ -139,11 +139,16 @@ export async function prepareWithdrawal(
   amount: bigint;
   recipient: string;
   root: string;
-  zkProofInputs: any;
+  zkProofInputs: Record<string, any>;
+  publicSignals: string[];
 }> {
-  const { note, amount, recipient, root } = withdrawParams;
+  const { note, amount, recipient, root, pathElements, pathIndices } = withdrawParams;
 
-  const zkProofInputs = {
+  // Convert path elements/indices to strings for snarkjs input
+  const pathElementsStr = pathElements.map((e) => e.toString());
+  const pathIndicesStr = pathIndices.map((i) => i.toString());
+
+  const zkProofInputs: Record<string, any> = {
     root,
     nullifierHash: note.nullifierHash,
     recipient,
@@ -154,10 +159,20 @@ export async function prepareWithdrawal(
     nullifier: note.nullifier,
     secret: note.secret,
     noteAmount: note.noteAmount.toString(),
-    // pathElements và pathIndices được lấy từ indexer/RPC (merkle tree audit path)
-    pathElements: [],
-    pathIndices: [],
+    pathElements: pathElementsStr,
+    pathIndices: pathIndicesStr,
+    commitment: note.commitment,
   };
+
+  // Public signals (để verify trên chain)
+  const publicSignals = [
+    root,
+    note.nullifierHash,
+    recipient,
+    "0x0000000000000000000000000000000000000000",
+    "0",
+    amount.toString(),
+  ];
 
   return {
     nullifierHash: note.nullifierHash,
@@ -166,5 +181,37 @@ export async function prepareWithdrawal(
     recipient,
     root,
     zkProofInputs,
+    publicSignals,
   };
+}
+
+/**
+ * Mã proof thành bytes calldata để gửi đến Solidity verifyProof.
+ * proof là object {A, B, C} từ snarkjs.
+ */
+export function encodeProof(proof: any): string {
+  const A = proof.pi_a;
+  const B = proof.pi_b;
+  const C = proof.pi_c;
+
+  const bytes = [];
+  // A.x, A.y
+  bytes.push(padTo64(A[0]));
+  bytes.push(padTo64(A[1]));
+  // B.x0, B.x1, B.y0, B.y1
+  bytes.push(padTo64(B[0][0]));
+  bytes.push(padTo64(B[0][1]));
+  bytes.push(padTo64(B[1][0]));
+  bytes.push(padTo64(B[1][1]));
+  // C.x, C.y
+  bytes.push(padTo64(C[0]));
+  bytes.push(padTo64(C[1]));
+
+  return "0x" + bytes.join("");
+}
+
+function padTo64(value: string): string {
+  let hex = value.startsWith("0x") ? value.slice(2) : value;
+  while (hex.length < 64) hex = "0" + hex;
+  return hex;
 }

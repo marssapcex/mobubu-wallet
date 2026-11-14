@@ -2,6 +2,7 @@
 pragma solidity ^0.8.24;
 
 import "./WithdrawalVerifier.sol";
+import "./lib/MerkleTree.sol";
 
 /**
  * @title AnonymousVault
@@ -20,6 +21,8 @@ import "./WithdrawalVerifier.sol";
  *  5. Nếu hợp lệ, đánh dấu nullifierHash đã dùng và gửi tiền đến recipient.
  */
 contract AnonymousVault is WithdrawalVerifier {
+    using MerkleTree for *;
+
     address public immutable owner;
 
     // Merkle tree params
@@ -43,6 +46,9 @@ contract AnonymousVault is WithdrawalVerifier {
     // Tổng số tiền đang khóa
     uint256 public totalLocked;
 
+    // Reentrancy guard
+    bool private _withdrawing;
+
     event Deposit(
         address indexed user,
         address indexed asset,
@@ -65,44 +71,8 @@ contract AnonymousVault is WithdrawalVerifier {
         // Khởi tạo leaf 0 là zero value (padding)
         leaves.push(ZERO_VALUE);
         leafAtIndex[0] = ZERO_VALUE;
-        latestRoot = keccak256(abi.encodePacked(ZERO_VALUE));
+        latestRoot = MerkleTree.hashCommitment(ZERO_VALUE, ZERO_VALUE);
         usedRoots[latestRoot] = true;
-    }
-
-    /**
-     * @dev Hash commitment (on-chain). Trong production, dùng Poseidon precompile
-     *      hoặc thư viện hash tương thích circuit (circomlib Poseidon Solidity).
-     */
-    function _hashCommitment(bytes32 nullifier, bytes32 secret) internal pure returns (bytes32) {
-        return keccak256(abi.encodePacked(nullifier, secret));
-    }
-
-    function _hashNullifier(bytes32 nullifier) internal pure returns (bytes32) {
-        return keccak256(abi.encodePacked(nullifier, 0));
-    }
-
-    /**
-     * @dev Tính Merkle root từ danh sách leaves hiện tại.
-     */
-    function _computeRoot() internal view returns (bytes32) {
-        if (leafCount == 0) return latestRoot;
-
-        bytes32[] memory tree = new bytes32[](leafCount);
-        for (uint256 i = 0; i < leafCount; i++) {
-            tree[i] = leafAtIndex[i];
-        }
-
-        uint256 size = leafCount;
-        while (size > 1) {
-            uint256 newSize = (size + 1) / 2;
-            for (uint256 i = 0; i < newSize; i++) {
-                bytes32 left = tree[2 * i];
-                bytes32 right = (2 * i + 1 < size) ? tree[2 * i + 1] : ZERO_VALUE;
-                tree[i] = keccak256(abi.encodePacked(left, right));
-            }
-            size = newSize;
-        }
-        return tree[0];
     }
 
     /**
@@ -132,7 +102,7 @@ contract AnonymousVault is WithdrawalVerifier {
         leafCount++;
 
         bytes32 oldRoot = latestRoot;
-        latestRoot = _computeRoot();
+        latestRoot = MerkleTree.computeRoot(leaves);
         usedRoots[latestRoot] = true;
 
         totalLocked += amount;
@@ -154,20 +124,29 @@ contract AnonymousVault is WithdrawalVerifier {
         bytes32 commitment,
         bytes calldata zkProof,
         bytes calldata thresholdSigs
-    ) external payable {
+    ) external payable nonReentrant {
         require(!spentNullifiers[nullifierHash], "AV: nullifier already spent");
         require(existingCommitments[commitment], "AV: commitment does not exist");
         require(usedRoots[root], "AV: unknown merkle root");
         require(root == latestRoot, "AV: stale merkle root");
-        require(zkProof.length > 0, "AV: invalid ZK proof");
+        require(zkProof.length == 64, "AV: invalid ZK proof length");
         require(thresholdSigs.length > 0, "AV: missing threshold signatures");
+
+        _withdrawing = true;
 
         // Verify ZK-SNARK proof (public inputs: [root, nullifierHash, recipient, relayer, fee, amount])
         // relayer = address(0), fee = 0 trong trường hợp đơn giản
         require(
             verifyProof(
                 zkProof,
-                new uint256[6]{uint256(root), uint256(nullifierHash), uint256(recipient), 0, 0, amount}
+                new uint256[6]{
+                    uint256(root),
+                    uint256(nullifierHash),
+                    uint256(recipient),
+                    0, // relayer
+                    0, // fee
+                    amount
+                }
             ),
             "AV: invalid ZK proof"
         );
@@ -176,6 +155,9 @@ contract AnonymousVault is WithdrawalVerifier {
         existingCommitments[commitment] = false;
         totalLocked -= amount;
 
+        _withdrawing = false;
+
+        // Gửi native coin đến recipient
         (bool success, ) = recipient.call{ value: amount }("");
         require(success, "AV: payment to recipient failed");
 
@@ -207,6 +189,13 @@ contract AnonymousVault is WithdrawalVerifier {
 
     function getLatestRoot() external view returns (bytes32) {
         return latestRoot;
+    }
+
+    modifier nonReentrant() {
+        require(!_withdrawing, "AV: reentrancy");
+        _withdrawing = true;
+        _;
+        _withdrawing = false;
     }
 
     modifier onlyOwner() {
