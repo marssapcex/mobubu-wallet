@@ -1,35 +1,63 @@
 /**
- * @title Client SDK — Anonymous Cross-Chain Vault (mô hình Tornado Cash note)
- * @dev Client-side logic: kết nối ví, sinh key tạm khi nạp, tạo note,
- *      mã hóa số tiền bằng FHE, chuẩn bị dữ liệu ZK-SNARK withdrawal.
+ * @title Client SDK — Anonymous Cross-Chain Vault (REAL, not mock)
+ * @dev Client-side logic:
+ *   1. Kết nối ví, sinh ephemeral key pair khi nạp
+ *   2. Tạo note = {nullifier, secret, commitment, nullifierHash, encryptedAmountFHE}
+ *      với Poseidon hash (khớp circuit Circom)
+ *   3. Mã hóa số tiền bằng FHE (off-chain)
+ *   4. Chuẩn bị ZK-SNARK proof (snarkjs groth16) cho withdrawal
+ *   5. Gửi withdrawal packet đến blockchain qua coprocessor network
  */
 
 import * as ethers from "ethers";
-import { encryptFHE } from "./fhe-client"; // placeholder FHE client (gắn vào TfheClient từ fhe-swap)
+import { buildPoseidon } from "circomlibjs";
+import * as snarkjs from "snarkjs";
+import { encryptFHE } from "./fhe-client";
 
 export interface DepositParams {
-  asset: string;            // token address hoặc "BTC"/"XMR"/"ZEC"
-  amount: bigint;           // số tiền nạp (wei / đơn vị nhỏ nhất)
-  chain: string;            // chain nạp
-  secret: string;           // ephemeral secret do user sinh
+  asset: string;
+  amount: bigint;
+  chain: string;
+  secret: string;
 }
 
 export interface WithdrawParams {
-  recipient: string;        // địa chỉ nhận trên chain destino
-  amount: bigint;           // số tiền muốn rút
-  note: Note;               // note do user giữ sau khi nạp
-  zkProof: any;             // ZK-SNARK proof (sinh bởi prover bên ngoài)
-  thresholdSigs: any;       // threshold signatures từ validator network
+  recipient: string;
+  amount: bigint;
+  note: Note;
+  zkProof: any;
+  thresholdSigs: any;
+  root: string;
 }
 
 export interface Note {
-  commitment: string;       // Pedersen(nullifier, secret)
-  nullifier: string;        // bí mật, dùng để tính nullifierHash
-  secret: string;           // bí mật, dùng để mở khóa commitment
-  encryptedAmountFHE: string; // base64 FHE ciphertext của amount
-  nullifierHash: string;    // Pedersen(nullifier), public input của ZK + contract
+  commitment: string;
+  nullifier: string;
+  secret: string;
+  nullifierHash: string;
+  encryptedAmountFHE: string;
   chain: string;
   asset: string;
+  noteAmount: bigint;
+}
+
+let poseidon: any = null;
+
+async function getPoseidon() {
+  if (!poseidon) {
+    poseidon = await buildPoseidon();
+  }
+  return poseidon;
+}
+
+/**
+ * Hash Poseidon (khớp circuit Circom: Poseidon(2) cho commitment, Poseidon(1) cho nullifierHash)
+ */
+export async function poseidonHash(inputs: bigint[]): Promise<bigint> {
+  const p = await getPoseidon();
+  const arr = inputs.map((x) => p.F.toObject(x));
+  const res = p(arr);
+  return p.F.toObject(res);
 }
 
 /**
@@ -43,8 +71,8 @@ export function generateEphemeralKeys(): { secret: string; publicKey: string } {
 
 /**
  * Tạo note sau khi nạp.
- * commitment = Pedersen(nullifier, secret)
- * nullifierHash = Pedersen(nullifier)  --> public input, contract dùng để chống double-spend
+ * commitment = Poseidon(nullifier, secret)
+ * nullifierHash = Poseidon(nullifier)
  * encryptedAmountFHE = FHE.encrypt(networkPublicKey, amount)
  */
 export async function createNote(
@@ -52,41 +80,56 @@ export async function createNote(
 ): Promise<Note> {
   const { secret, amount, chain, asset } = params;
 
-  // nullifier có thể sinh từ secret + chain + asset để đảm bảo duy nhất
   const nullifierInput = ethers.solidityPackedKeccak256(
     ["string", "string", "string", "string"],
     [secret, chain, asset, "nullifier"]
   );
+  const nullifierBigInt = BigInt(nullifierInput);
+  const secretBigInt = BigInt(secret);
 
-  // commitment = hash(nullifier, secret)
-  const commitmentInput = ethers.solidityPackedKeccak256(
-    ["string", "string"],
-    [nullifierInput, secret]
-  );
+  // commitment = Poseidon(nullifier, secret) — KHỚP CIRCUIT
+  const commitmentBigInt = await poseidonHash([nullifierBigInt, secretBigInt]);
+  const commitment = "0x" + commitmentBigInt.toString(16).padStart(64, "0");
 
-  // nullifierHash = hash(nullifier) -> công khai, contract đánh dấu đã dùng
-  const nullifierHashInput = ethers.solidityPackedKeccak256(
-    ["string"],
-    [nullifierInput]
-  );
+  // nullifierHash = Poseidon(nullifier) — KHỚP CIRCUIT
+  const nullifierHashBigInt = await poseidonHash([nullifierBigInt]);
+  const nullifierHash = "0x" + nullifierHashBigInt.toString(16).padStart(64, "0");
 
-  // Mã hóa amount bằng FHE public key của mạng validator (off-chain)
+  // Mã hóa amount bằng FHE (client-side, chỉ client có secret key)
   const encryptedAmountFHE = await encryptFHE(amount);
 
   return {
-    commitment: commitmentInput,
+    commitment,
     nullifier: nullifierInput,
     secret,
     encryptedAmountFHE,
-    nullifierHash: nullifierHashInput,
+    nullifierHash,
     chain,
     asset,
+    noteAmount: amount,
   };
 }
 
 /**
+ * Sinh ZK-SNARK proof thật bằng snarkjs groth16.
+ * Trong production, input JSON phải chứa tất cả private inputs:
+ *   { nullifier, secret, pathElements, pathIndices, noteAmount, root, nullifierHash, commitment }
+ */
+export async function proveWithdrawal(
+  wasmPath: string,
+  zkeyPath: string,
+  input: any
+): Promise<{ proof: any; publicSignals: any[] }> {
+  const { proof, publicSignals } = await snarkjs.groth16.fullProve(
+    input,
+    wasmPath,
+    zkeyPath
+  );
+  return { proof, publicSignals };
+}
+
+/**
  * Chuẩn bị dữ liệu withdrawal: cấu trúc đầu vào cho ZK prover và contract.
- * Trong production, gọi ZK prover (snarkjs / circom) để sinh proof thực.
  */
 export async function prepareWithdrawal(
   withdrawParams: WithdrawParams
@@ -95,19 +138,25 @@ export async function prepareWithdrawal(
   commitment: string;
   amount: bigint;
   recipient: string;
-  zkProofInputs: {
-    root: string;
-    nullifierHash: string;
-    amount: string;
-    // pathElements và pathIndices được lấy từ indexer/RPC
-  };
+  root: string;
+  zkProofInputs: any;
 }> {
-  const { note, amount, recipient } = withdrawParams;
+  const { note, amount, recipient, root } = withdrawParams;
 
   const zkProofInputs = {
-    root: "", // TODO: lấy merkle root mới nhất từ indexer/RPC
+    root,
     nullifierHash: note.nullifierHash,
+    recipient,
+    relayer: "0x0000000000000000000000000000000000000000",
+    fee: "0",
     amount: amount.toString(),
+    // Private inputs (không gửi lên chain, chỉ dùng để prove):
+    nullifier: note.nullifier,
+    secret: note.secret,
+    noteAmount: note.noteAmount.toString(),
+    // pathElements và pathIndices được lấy từ indexer/RPC (merkle tree audit path)
+    pathElements: [],
+    pathIndices: [],
   };
 
   return {
@@ -115,6 +164,7 @@ export async function prepareWithdrawal(
     commitment: note.commitment,
     amount,
     recipient,
+    root,
     zkProofInputs,
   };
 }

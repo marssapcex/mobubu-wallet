@@ -1,91 +1,70 @@
+pragma circom 2.1.6;
+
+include "circomlib/circuits/poseidon.circom";
+include "circomlib/circuits/comparators.circom";
+include "circomlib/circuits/bitify.circom";
+include "./merkleTree.circom";
+
 /**
- * @title Withdrawal Circuit (Circom, mô hình Tornado Cash + amount check)
+ * @title Withdrawal Circuit (Circom 2, real)
  * @dev ZK-SNARK circuit cho anonymous withdrawal.
  *
- * Public inputs:
- *   root            - merkle root của các deposits
- *   nullifierHash   - H(nullifier), dùng để chống double-spend (public)
- *   amount          - số tiền muốn rút (public)
+ * Public inputs: root, nullifierHash, recipient, relayer, fee, amount
+ * Private inputs: nullifier, secret, pathElements, pathIndices, noteAmount
  *
- * Private inputs (witness):
- *   nullifier       - nullifier bí mật của note
- *   secret          - secret bí mật mở khóa commitment
- *   noteAmount      - số tiền thực tế trong note (phải >= amount)
- *   pathElements    - đường dẫn merkle
- *   pathIndices     - chỉ số trái/phải trong merkle path
- *
- * Constraints:
- *   commitment      = Pedersen(nullifier, secret)
- *   commitment      nằm trong merkle tree (root)
- *   nullifierHash   = Pedersen(nullifier)
- *   noteAmount      >= amount
+ * Ràng buộc:
+ *   commitment = Poseidon(nullifier, secret)
+ *   nullifierHash = Poseidon(nullifier)
+ *   commitment nằm trong Merkle tree (root)
+ *   0 < amount <= noteAmount
  */
-
-include "../node_modules/circomlib/circuits/bitify.circom";
-include "../node_modules/circomlib/circuits/pedersen.circom";
-include "merkleTree.circom";
-
-// Tính commitment = Pedersen(nullifier, secret)
-template CommitmentHasher() {
-    signal input nullifier;
-    signal input secret;
-    signal output commitment;
-
-    component commitmentHasher = Pedersen(2);
-    commitmentHasher.in[0] <== nullifier;
-    commitmentHasher.in[1] <== secret;
-    commitment <== commitmentHasher.out[0];
-}
-
-// Tính nullifierHash = Pedersen(nullifier)
-template NullifierHasher() {
-    signal input nullifier;
-    signal output nullifierHash;
-
-    component nullifierHasher = Pedersen(1);
-    nullifierHasher.in[0] <== nullifier;
-    nullifierHash <== nullifierHasher.out[0];
-}
-
-template Withdraw(levels) {
-    // Public inputs
+template Withdraw(levels, nBits) {
+    // === Public inputs ===
     signal input root;
     signal input nullifierHash;
+    signal input recipient;
+    signal input relayer;
+    signal input fee;
     signal input amount;
 
-    // Private inputs
-    signal private input nullifier;
-    signal private input secret;
-    signal private input noteAmount;
-    signal private input pathElements[levels];
-    signal private input pathIndices[levels];
+    // === Private inputs ===
+    signal input nullifier;
+    signal input secret;
+    signal input pathElements[levels];
+    signal input pathIndices[levels];
+    signal input noteAmount;
 
-    // 1. commitment = Pedersen(nullifier, secret)
-    component hasher = CommitmentHasher();
-    hasher.nullifier <== nullifier;
-    hasher.secret <== secret;
+    // 1. Commitment = Poseidon(nullifier, secret)
+    component commitmentHasher = Poseidon(2);
+    commitmentHasher.inputs[0] <== nullifier;
+    commitmentHasher.inputs[1] <== secret;
+    signal commitment;
+    commitment <== commitmentHasher.out;
 
-    // 2. nullifierHash = Pedersen(nullifier)
-    component nullifierHasher = NullifierHasher();
-    nullifierHasher.nullifier <== nullifier;
+    // 2. NullifierHash = Poseidon(nullifier)
+    component nullifierHasher = Poseidon(1);
+    nullifierHasher.inputs[0] <== nullifier;
+    nullifierHash === nullifierHasher.out;
 
-    // 3. Merkle proof: commitment nằm trong tree với root
-    component tree = MerkleTreeChecker(levels);
-    tree.leaf <== hasher.commitment;
-    tree.root <== root;
-    for (var i = 0; i < levels; i++) {
+    // 3. Merkle inclusion proof
+    component tree = MerkleTreeInclusionProof(levels);
+    tree.leaf <== commitment;
+    for (let i = 0; i < levels; i++) {
         tree.pathElements[i] <== pathElements[i];
         tree.pathIndices[i] <== pathIndices[i];
     }
+    root === tree.root;
 
-    // 4. Amount check: noteAmount >= amount (Circom enforces non-negative)
-    signal enoughBalance;
-    enoughBalance <== noteAmount - amount;
+    // 4. Amount check: 0 < amount <= noteAmount
+    component amountCheck = LessEqThan(nBits);
+    amountCheck.in[0] <== amount;
+    amountCheck.in[1] <== noteAmount;
+    amountCheck.out === 1;
 
-    // Ràng buộc public inputs
-    hasher.commitment === tree.leaf;         // commitment đã tính khớp với leaf
-    nullifierHasher.nullifierHash === nullifierHash; // nullifierHash công khai khớp
-    enoughBalance >= 0;                      // không rút quá số có trong note
+    component positive = GreaterThan(nBits);
+    positive.in[0] <== amount;
+    positive.in[1] <== 0;
+    positive.out === 1;
 }
 
-component main = Withdraw(20);
+component main {public [root, nullifierHash, recipient, relayer, fee, amount]} = Withdraw(20, 32);
