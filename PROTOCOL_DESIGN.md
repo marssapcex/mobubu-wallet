@@ -33,3 +33,40 @@ Cho phép người dùng nạp tiền vào vault trên chain A, rút ra trên ch
 - EVM chains (Ethereum, BSC, Polygon, v.v.)
 - Bitcoin (qua gateway/vault contract)
 - Monero, Zcash (qua light client hoặc gateway tương thích)
+
+## 7. Yield Vault + EIP-7702 + Tokenized Assets (RWA)
+
+### 7.1 YieldVault
+Cho phép người dùng gửi tiền vào pool keeper lâu để kiếm lãi (yield).
+- Người dùng nạp token vào YieldVault, nhận yToken (ERC20 đại diện cho quyền sở hữu).
+- Lãi tính theo APR (basis points) và thời gian giữ: `interest = amount * aprBps * elapsedSeconds / (SECONDS_PER_YEAR * PRECISION)`.
+- Người dùng có thể withdraw gốc + lãi, hoặc claim chỉ lãi.
+- Hỗ trợ EIP-7702: ví EOA bình thường có thể tạm thời "mượn" code của YieldVault để thực hiện deposit/withdraw/claim trong một transaction duy nhất, không cần đổi địa chỉ ví.
+
+### 7.2 EIP-7702 (Ephemeral Account Delegation)
+Trước Pectra, EOA chỉ có private key, không chạy được code. Sau EIP-7702:
+- EOA gửi transaction có authorization list, ký để "set code" của mình thành smart contract address.
+- Các lời gọi đến EOA sẽ delegatecall đến code của contract đó.
+- Trong mobubu-wallet: EOA authorize code của YieldVault/TokenizedAsset, rồi gọi deposit/withdraw/mint/redeem qua ephemeral account.
+- Privacy được giữ nguyên: ephemeral account không liên kết trực tiếp với ví public gốc.
+
+### 7.3 Tokenized Asset (RWA - Real World Assets)
+Token hóa cổ phiếu / tài sản thực thế (ví dụ: S&P 500).
+- Mỗi token đại diện cho 1 đơn vị cổ phiếu (hoặc tỉ lệ cố định).
+- Liên kết với Oracle giá (Chainlink-style).
+- Cho phép mint token khi gửi collateral (ETH/DAI), redeem để nhận lại collateral.
+- Giá trị token được cập nhật theo oracle giá.
+
+### 7.4 Luồng Yield + EIP-7702
+```
+User ──nạp tiền ẩn danh vào AnonymousVault──> (note, commitment, nullifier)
+User ──stake vào YieldVault qua EIP-7702──> ephemeral account chạy code vault
+YieldVault ──tính lãi theo APR + thời gian──> yToken tăng giá trị
+User ──claim lãi hoặc withdraw──> nhận lại tiền (vẫn ẩn danh nhờ nullifier)
+```
+
+### 7.5 Chuỗi hỗ trợ (mục tiêu)
+- EVM chains (Ethereum, BSC, Polygon, v.v.)
+- Bitcoin (qua gateway/vault contract)
+- Monero, Zcash (qua light client hoặc gateway tương thích)
+- Tokenized assets: SP500, RWA (real-world assets)

@@ -215,3 +215,17 @@ function padTo64(value: string): string {
   while (hex.length < 64) hex = "0" + hex;
   return hex;
 }
+
+// ============ Yield Vault + EIP-7702 + Tokenized Assets ============
+export {
+  YieldVaultClient,
+  TokenizedAssetClient,
+  type YieldVaultConfig,
+  type TokenizedAssetConfig,
+  type DepositYieldParams,
+  type WithdrawYieldParams,
+  type MintTokenizedParams,
+  type RedeemTokenizedParams,
+  encodeEIP7702Authorization,
+  computeCodeHash,
+} from "./yield";
