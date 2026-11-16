@@ -1,12 +1,10 @@
-pragma circom 2.1.6;
-
 include "circomlib/circuits/poseidon.circom";
 include "circomlib/circuits/comparators.circom";
 include "circomlib/circuits/bitify.circom";
 include "./merkleTree.circom";
 
 /**
- * @title Withdrawal Circuit (Circom 2, real)
+ * @title Withdrawal Circuit (Circom 0.5.x)
  * @dev ZK-SNARK circuit cho anonymous withdrawal.
  *
  * Public inputs: root, nullifierHash, recipient, relayer, fee, amount
@@ -18,7 +16,7 @@ include "./merkleTree.circom";
  *   commitment nằm trong Merkle tree (root)
  *   0 < amount <= noteAmount
  */
-template Withdraw(levels, nBits) {
+template Withdraw() {
     // === Public inputs ===
     signal input root;
     signal input nullifierHash;
@@ -30,8 +28,8 @@ template Withdraw(levels, nBits) {
     // === Private inputs ===
     signal input nullifier;
     signal input secret;
-    signal input pathElements[levels];
-    signal input pathIndices[levels];
+    signal input pathElements[20];
+    signal input pathIndices[20];
     signal input noteAmount;
 
     // 1. Commitment = Poseidon(nullifier, secret)
@@ -47,24 +45,24 @@ template Withdraw(levels, nBits) {
     nullifierHash === nullifierHasher.out;
 
     // 3. Merkle inclusion proof
-    component tree = MerkleTreeInclusionProof(levels);
+    component tree = MerkleTreeInclusionProof(20);
     tree.leaf <== commitment;
-    for (let i = 0; i < levels; i++) {
+    tree.root <== root;
+    for (var i = 0; i < 20; i++) {
         tree.pathElements[i] <== pathElements[i];
         tree.pathIndices[i] <== pathIndices[i];
     }
-    root === tree.root;
 
     // 4. Amount check: 0 < amount <= noteAmount
-    component amountCheck = LessEqThan(nBits);
+    component amountCheck = LessEqThan(32);
     amountCheck.in[0] <== amount;
     amountCheck.in[1] <== noteAmount;
     amountCheck.out === 1;
 
-    component positive = GreaterThan(nBits);
+    component positive = GreaterThan(32);
     positive.in[0] <== amount;
     positive.in[1] <== 0;
     positive.out === 1;
 }
 
-component main {public [root, nullifierHash, recipient, relayer, fee, amount]} = Withdraw(20, 32);
+component main = Withdraw();

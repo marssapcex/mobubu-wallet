@@ -1,22 +1,15 @@
-/**
- * @title Merkle Tree Checker (Circom v2)
- * @dev Xác minh một leaf nằm trong Merkle tree với root cho trước.
- *      Dùng Pedersen hash từ circomlib.
- */
-
-include "circomlib/circuits/pedersen.circom";
 include "circomlib/circuits/poseidon.circom";
 
-// Hash hai node con thành node cha (Pedersen)
+// Hash hai node con thành node cha (Poseidon)
 template HashTwo() {
     signal input left;
     signal input right;
     signal output hash;
 
-    component hasher = Pedersen(2);
-    hasher.in[0] <== left;
-    hasher.in[1] <== right;
-    hash <== hasher.out[0];
+    component hasher = Poseidon(2);
+    hasher.inputs[0] <== left;
+    hasher.inputs[1] <== right;
+    hash <== hasher.out;
 }
 
 // DualMux: chọn trái/phải dựa trên bit s
@@ -40,7 +33,7 @@ template MerkleTreeChecker(levels) {
     component selectors[levels];
     component hashers[levels];
 
-    for (let i = 0; i < levels; i++) {
+    for (var i = 0; i < levels; i++) {
         selectors[i] = DualMux();
         selectors[i].in[0] <== i == 0 ? leaf : hashers[i - 1].hash;
         selectors[i].in[1] <== pathElements[i];
@@ -54,8 +47,29 @@ template MerkleTreeChecker(levels) {
     root === hashers[levels - 1].hash;
 }
 
-// MerkleTreeInclusionProof: alias cho MerkleTreeChecker (dùng trong withdraw.circom)
-// leaf + pathElements + pathIndices -> root, constrain root === input
+// Commitment hasher: commitment = Poseidon(nullifier, secret)
+template CommitmentHasher() {
+    signal input nullifier;
+    signal input secret;
+    signal output commitment;
+
+    component hasher = Poseidon(2);
+    hasher.inputs[0] <== nullifier;
+    hasher.inputs[1] <== secret;
+    commitment <== hasher.out[0];
+}
+
+// Nullifier hasher: nullifierHash = Poseidon(nullifier)
+template NullifierHasher() {
+    signal input nullifier;
+    signal output nullifierHash;
+
+    component hasher = Poseidon(1);
+    hasher.inputs[0] <== nullifier;
+    nullifierHash <== hasher.out;
+}
+
+// Alias for withdraw.circom compatibility
 template MerkleTreeInclusionProof(levels) {
     signal input leaf;
     signal input root;
@@ -65,31 +79,8 @@ template MerkleTreeInclusionProof(levels) {
     component checker = MerkleTreeChecker(levels);
     checker.leaf <== leaf;
     checker.root <== root;
-    for (let i = 0; i < levels; i++) {
+    for (var i = 0; i < levels; i++) {
         checker.pathElements[i] <== pathElements[i];
         checker.pathIndices[i] <== pathIndices[i];
     }
-}
-
-// Commitment hasher: commitment = Pedersen(nullifier, secret)
-template CommitmentHasher() {
-    signal input nullifier;
-    signal input secret;
-    signal output commitment;
-
-    component hasher = Pedersen(2);
-    hasher.in[0] <== nullifier;
-    hasher.in[1] <== secret;
-    commitment <== hasher.out[0];
-}
-
-// Nullifier hasher: nullifierHash = Pedersen(nullifier, 0)
-template NullifierHasher() {
-    signal input nullifier;
-    signal output nullifierHash;
-
-    component hasher = Pedersen(2);
-    hasher.in[0] <== nullifier;
-    hasher.in[1] <== 0;
-    nullifierHash <== hasher.out[0];
 }

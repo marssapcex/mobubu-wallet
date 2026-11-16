@@ -332,7 +332,9 @@ describe("Anonymous cross-chain withdrawal (Coprocessor + ZK + FHE 16-bit)", () 
 
   it("CoprocessorNode rejects double vote", () => {
     const node = new CoprocessorNode("test-node");
-    assert.equal(node.signVote("0xhash1", true), node.signVote("0xhash2", true) ? "should throw" : "ok");
-    assert.throws(() => node.signVote("0xhash1", true), /already voted/);
+    const vote1 = node.signVote("0xhash1", true);
+    const vote2 = node.signVote("0xhash2", true);
+    assert.notEqual(vote1, vote2); // different hashes -> different signatures
+    assert.throws(() => node.signVote("0xhash1", true), /already voted/); // same hash -> throw
   });
 });
