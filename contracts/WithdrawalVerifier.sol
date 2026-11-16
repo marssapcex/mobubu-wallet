@@ -162,25 +162,23 @@ contract WithdrawalVerifier {
 
         // Decode proof (8 uint256 packed in 64 bytes)
         require(proof.length == 64, "VV: proof must be 64 bytes");
-        uint256[8] memory p;
-        assembly {
-            p[0] := and(div(calldataload(add(proof, 0)), 0x1000000000000000000000000000000000000000000000000000000000000000), 0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff)
-            // Simplified: use calldata copy for proper decoding in production
-        }
-        // Proper decoding using abi.decode for clarity
         (uint256 p0, uint256 p1, uint256 p2, uint256 p3, uint256 p4, uint256 p5, uint256 p6, uint256 p7) =
             abi.decode(proof, (uint256, uint256, uint256, uint256, uint256, uint256, uint256, uint256));
-        p[0] = p0; p[1] = p1; p[2] = p2; p[3] = p3; p[4] = p4; p[5] = p5; p[6] = p6; p[7] = p7;
 
         // Validate proof points are on curve (simplified: check < PRIME_Q)
-        for (uint i = 0; i < 8; i++) {
-            require(p[i] < PRIME_Q, "VV: proof element >= prime q");
-        }
+        require(p0 < PRIME_Q, "VV: proof element A.x >= prime q");
+        require(p1 < PRIME_Q, "VV: proof element A.y >= prime q");
+        require(p2 < PRIME_Q, "VV: proof element B.x0 >= prime q");
+        require(p3 < PRIME_Q, "VV: proof element B.x1 >= prime q");
+        require(p4 < PRIME_Q, "VV: proof element B.y0 >= prime q");
+        require(p5 < PRIME_Q, "VV: proof element B.y1 >= prime q");
+        require(p6 < PRIME_Q, "VV: proof element C.x >= prime q");
+        require(p7 < PRIME_Q, "VV: proof element C.y >= prime q");
 
         Proof memory _proof;
-        _proof.A = G1Point(p[0], p[1]);
-        _proof.B = G2Point([p[2], p[3]], [p[4], p[5]]);
-        _proof.C = G1Point(p[6], p[7]);
+        _proof.A = G1Point(p0, p1);
+        _proof.B = G2Point([p2, p3], [p4, p5]);
+        _proof.C = G1Point(p6, p7);
 
         VerifyingKey memory vk = verifyingKey();
 

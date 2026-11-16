@@ -15,7 +15,7 @@ export async function initFHEClient(cloudKeyPath?: string): Promise<void> {
   if (client) return;
   const { crypto } = await makeTfhe({
     role: "client",
-    width: 32,
+    width: 16,
     security: 128,
   });
   client = crypto as TfheClient;

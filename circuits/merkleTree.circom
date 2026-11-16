@@ -54,6 +54,23 @@ template MerkleTreeChecker(levels) {
     root === hashers[levels - 1].hash;
 }
 
+// MerkleTreeInclusionProof: alias cho MerkleTreeChecker (dùng trong withdraw.circom)
+// leaf + pathElements + pathIndices -> root, constrain root === input
+template MerkleTreeInclusionProof(levels) {
+    signal input leaf;
+    signal input root;
+    signal input pathElements[levels];
+    signal input pathIndices[levels];
+
+    component checker = MerkleTreeChecker(levels);
+    checker.leaf <== leaf;
+    checker.root <== root;
+    for (let i = 0; i < levels; i++) {
+        checker.pathElements[i] <== pathElements[i];
+        checker.pathIndices[i] <== pathIndices[i];
+    }
+}
+
 // Commitment hasher: commitment = Pedersen(nullifier, secret)
 template CommitmentHasher() {
     signal input nullifier;
