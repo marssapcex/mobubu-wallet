@@ -1,0 +1,56 @@
+fhe-swap — reference implementation
+====================================
+
+This repository is an original TypeScript reference implementation inspired by
+the public architecture of THORChain and Serai. It does not vendor or copy
+upstream source code into src/.
+
+Upstream projects and licenses
+------------------------------
+
+1. THORChain / thornode
+   Canonical: https://gitlab.com/thorchain/thornode
+   GitHub mirror (deprecated, README-only at time of writing):
+     https://github.com/thorchain/thornode
+   License: MIT (see upstream LICENSE).
+
+2. Serai
+   Canonical: https://github.com/serai-dex/serai
+   License: mixed per crate. Examples at the inspected commit:
+     - crypto/frost: MIT
+     - crypto/dleq: MIT
+     - networks/bitcoin: MIT
+     - networks/ethereum: AGPL-3.0-only
+     - processor: AGPL-3.0-only
+     - substrate/dex/pallet: AGPL-3.0-only (with an Apache2 license file present)
+     - substrate/in-instructions/pallet: AGPL-3.0-only
+   Always check the LICENSE file in the specific crate you copy or link.
+
+3. monero-oxide / monero-clsag / FROSTLASS
+   Canonical: https://github.com/monero-oxide/monero-oxide
+   FROSTLASS paper: https://eprint.iacr.org/2026/589.pdf
+   License at inspected commit a6b46701fb9b331006d7f2f2278bf51f123b1447:
+     - monero-oxide/ringct/clsag: MIT
+   This project references the FROSTLASS/CLSAG multisig boundary but does not
+   vendor monero-oxide source into src/.
+
+4. Microsoft SEAL / node-seal
+   node-seal: https://github.com/s0l0ist/node-seal (MIT)
+   Microsoft SEAL: https://github.com/microsoft/SEAL (MIT)
+   This project depends on node-seal at runtime; see package.json.
+
+No upstream code is included in the distributed fhe-swap source tree. If you
+later vendor or adapt AGPL-3.0 code, the combined work must comply with AGPL-3.0.
+The MIT license of this reference implementation does not relicense upstream
+AGPL components.
+
+Security status
+---------------
+
+This is a research/reference prototype, not audited production software.
+The v1 homomorphic backend is SEAL BFV leveled HE, not TFHE bootstrapped FHE.
+The v2 private orderflow layer is AES-GCM + Shamir threshold opening, not
+audited threshold FHE. The mock chain adapters and mock threshold signer never
+touch real funds. RPC adapters are integration scaffolds and require real vault
+indexing, threshold signing, fee estimation, reorg handling, and operational
+review.

@@ -1,0 +1,11 @@
+node_modules/
+dist/
+.venv/
+.cache/
+.env
+.env.*
+*.pem
+*.key
+coverage/
+*.log
+.DS_Store
