@@ -1,6 +1,6 @@
 import { randomBytes } from "node:crypto";
 import { formatUnits, parseUnits } from "ethers";
-import { nativeAsset, parseNativeAssetArg } from "../../../fhe-swap/src/network-catalog.mjs";
+import { nativeAsset, parseNativeAssetArg } from "../src/network-catalog.mjs";
 import { setupLocalZk } from "./zk-local-setup.mjs";
 import { demoLiquidity, demoOracle } from "../../../scripts/note-fixtures.mjs";
 import { openValueNoteEvm } from "../test/support/vault-evm.mjs";

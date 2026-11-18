@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { parseUnits } from "ethers";
-import { NATIVE_ASSET_IDS, nativeAsset } from "../fhe-swap/src/network-catalog.mjs";
+import { NATIVE_ASSET_IDS, nativeAsset } from "../legacy/groth16/src/network-catalog.mjs";
 import { ORACLE_NETWORKS, PRICE_SYMBOLS } from "../packages/oracle/src/feed-policy.mjs";
 import { CrossChainOracle } from "../packages/oracle/src/market-oracle.mjs";
 

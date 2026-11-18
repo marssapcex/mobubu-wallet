@@ -111,17 +111,21 @@ export class CrossChainOracle {
     }
   }
 
-  checkQuote(from, to, amountIn, amountOut, now = this.#now()) {
-    const a = nativeAsset(from), b = nativeAsset(to);
-    const snapshot = this.#active;
-    if (!snapshot || !timestamp(now) || now < snapshot.asOf || now >= snapshot.validUntil) {
+  snapshot(now = this.#now()) {
+    const active = this.#active;
+    if (!active || !timestamp(now) || now < active.asOf || now >= active.validUntil) {
       throw new Error("oracle snapshot unavailable or expired");
     }
+    return active;
+  }
+
+  checkQuote(from, to, amountIn, amountOut, now = this.#now()) {
+    const a = nativeAsset(from), b = nativeAsset(to);
+    const snapshot = this.snapshot(now);
     if (typeof amountIn !== "bigint" || amountIn <= 0n || typeof amountOut !== "bigint" || amountOut <= 0n) {
       throw new Error("invalid oracle quote amounts");
     }
-    // Compare notional values without any integer division, for both directions
-    // and also when the symbol is the same but the chain inventories differ.
+    // Compare value in base units without division; this does not authorize a payout.
     const inputValue = amountIn * snapshot.pricesUsd18[a.symbol] * 10n ** BigInt(b.decimals);
     const outputValue = amountOut * snapshot.pricesUsd18[b.symbol] * 10n ** BigInt(a.decimals);
     if (distance(inputValue, outputValue) * BPS > inputValue * MAX_QUOTE_DEVIATION_BPS) {

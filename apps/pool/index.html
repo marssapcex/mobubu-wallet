@@ -1,0 +1,130 @@
+<!doctype html>
+<html lang="vi">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Mobubu · Pool</title>
+    <link rel="stylesheet" href="./pool.css" />
+    <script type="module" src="./pool.mjs"></script>
+  </head>
+  <body>
+    <header class="bar">
+      <div class="brand">
+        <span class="brand-mark" aria-hidden="true">◈</span
+        ><strong>mobubu</strong><span class="divider"></span><span>Pool</span>
+      </div>
+      <span class="badge"><span aria-hidden="true"></span> Chỉ dùng thử</span>
+    </header>
+    <main>
+      <section class="intro" aria-labelledby="title">
+        <p class="eyebrow">MOBUBU / NATIVE POOLS</p>
+        <h1 id="title">Nạp trước.<br />Đổi <em>lúc rút.</em></h1>
+        <p>Ba coin native, ba mạng gốc. Không báo giá khi nạp.</p>
+      </section>
+      <section class="dashboard" aria-label="Native Pool">
+        <div class="form-card">
+          <div class="tabs" aria-label="Thao tác">
+            <button
+              id="deposit-tab"
+              type="button"
+              aria-pressed="true"
+              aria-controls="deposit"
+            >
+              Nạp
+            </button>
+            <button
+              id="exit-tab"
+              type="button"
+              aria-pressed="false"
+              aria-controls="exit"
+            >
+              Rút
+            </button>
+          </div>
+          <form id="deposit">
+            <label for="deposit-asset">Coin nạp</label>
+            <select id="deposit-asset" name="asset"></select>
+            <label for="amount">Số lượng</label>
+            <div class="amount">
+              <input
+                id="amount"
+                name="amount"
+                inputmode="decimal"
+                autocomplete="off"
+                placeholder="0.00"
+                maxlength="49"
+                required
+              /><span id="unit">ETH</span>
+            </div>
+            <p class="hint" id="precision"></p>
+            <button class="primary" type="submit">
+              Tạo note thử <span aria-hidden="true">↗</span>
+            </button>
+            <div class="result" id="draft" hidden>
+              <strong>Note thử đã tạo</strong>
+              <p id="note-line"></p>
+              <button type="button" class="secondary" id="download">
+                Tải note về máy ↓
+              </button>
+            </div>
+          </form>
+          <form id="exit" hidden>
+            <label for="note-file">Note của bạn</label>
+            <input
+              type="file"
+              id="note-file"
+              accept="application/json,.json"
+              aria-describedby="note-info"
+            />
+            <p class="hint" id="note-info">
+              File chỉ được đọc trên thiết bị này.
+            </p>
+            <label for="exit-amount">Số lượng rút</label>
+            <div class="amount">
+              <input
+                id="exit-amount"
+                inputmode="decimal"
+                maxlength="49"
+                placeholder="0.00"
+                autocomplete="off"
+              /><span id="exit-unit">—</span>
+            </div>
+            <p class="hint" id="change-info" aria-live="polite"></p>
+            <label for="receive-asset">Coin nhận</label>
+            <select id="receive-asset" name="receive"></select>
+            <label for="receive-address">Địa chỉ mới</label>
+            <input
+              id="receive-address"
+              maxlength="90"
+              placeholder="Địa chỉ trên mạng đích"
+              autocomplete="off"
+              spellcheck="false"
+            />
+            <p id="exit-hint" class="hint"></p>
+            <button class="primary" type="submit" disabled>
+              Rút chưa bật trong preview
+            </button>
+          </form>
+          <p
+            class="feedback"
+            id="feedback"
+            role="status"
+            aria-live="polite"
+            hidden
+          ></p>
+        </div>
+        <aside class="vaults" aria-label="Ba mạng gốc">
+          <h2>Vaults <span>03</span></h2>
+          <div id="chains" class="chain-list"></div>
+          <p class="vault-note">
+            Bản này không kết nối ví, không đưa địa chỉ nạp và không chạy payout
+            thật.
+          </p>
+        </aside>
+      </section>
+    </main>
+    <footer>
+      <span>Mobubu Pool</span><span>Bản phát triển · Không dùng tiền thật</span>
+    </footer>
+  </body>
+</html>

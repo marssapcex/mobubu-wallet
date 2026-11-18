@@ -1,6 +1,6 @@
 # fhe-swap — local FHE experiments and mock NYX streaming
 
-**Do not use real funds.** This package provides the TFHE engine used by [native BTC/ETH/BNB settlement](../docs/NATIVE-SWAP.md). The BFV demo and NYX streaming engine below remain independent research tools; the streaming mock does not drive that settlement. These are three separate paths:
+**Do not use real funds.** This package provides the TFHE engine used by [native BTC/ETH/BNB settlement](../docs/NATIVE-SWAP.md). The same worker also evaluates the new pool’s exact base-unit quote at exit (128-bit client I/O, up to 160-bit evaluation). The BFV demo and NYX streaming engine below remain independent research tools; the streaming mock does not drive that settlement. These are three separate paths:
 
 | Path | What it does | What it does not do |
 | --- | --- | --- |

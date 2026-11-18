@@ -19,7 +19,7 @@ npm --prefix legacy/groth16 run demo:notes -- --note ETH@base ETH@optimism 0.2 0
 npm --prefix legacy/groth16 test
 ```
 
-Đối số là `assetNạp assetNhận sốNạp sốMuốnNhận`, dùng dấu `.` cho phần thập phân. [Danh mục](../fhe-swap/src/network-catalog.mjs) yêu cầu `COIN@network` trong ledger; CLI vẫn nhận ký hiệu ngắn cho BTC trên Bitcoin (8 chữ số), ETH trên Ethereum mainnet (18) và BNB trên BSC (18). WBTC, WETH, WBNB, BTCB và các token khác đều bị từ chối. Ví dụ nạp `0.731234567891234567 ETH`, yêu cầu `0.01000003 BTC`: thanh khoản mẫu tính cần trừ `0.200642596235379323 ETH` và còn `0.530591971655855244 ETH` trong note mới. **Đây không phải giá thị trường.** Khi yêu cầu nhiều hơn note có thể chi, từ chối; không tiêu note để rồi mới báo thiếu. Lần đầu chạy tạo artifacts Groth16 dùng một lần khoảng 3 phút trong thư mục build đã ignore.
+Đối số là `assetNạp assetNhận sốNạp sốMuốnNhận`, dùng dấu `.` cho phần thập phân. [Danh mục](../legacy/groth16/src/network-catalog.mjs) yêu cầu `COIN@network` trong ledger; CLI vẫn nhận ký hiệu ngắn cho BTC trên Bitcoin (8 chữ số), ETH trên Ethereum mainnet (18) và BNB trên BSC (18). WBTC, WETH, WBNB, BTCB và các token khác đều bị từ chối. Ví dụ nạp `0.731234567891234567 ETH`, yêu cầu `0.01000003 BTC`: thanh khoản mẫu tính cần trừ `0.200642596235379323 ETH` và còn `0.530591971655855244 ETH` trong note mới. **Đây không phải giá thị trường.** Khi yêu cầu nhiều hơn note có thể chi, từ chối; không tiêu note để rồi mới báo thiếu. Lần đầu chạy tạo artifacts Groth16 dùng một lần khoảng 3 phút trong thư mục build đã ignore.
 
 ## Note v3: chứng minh giá trị, không chỉ chứng minh có note
 

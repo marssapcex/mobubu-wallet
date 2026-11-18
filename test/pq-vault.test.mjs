@@ -128,7 +128,7 @@ function flipLastByte(signature) {
 }
 
 test("the build and package export the new vault ABI and canonical signed bytes", async () => {
-  assert.deepEqual(Object.keys(compiled).sort(), [VAULT_SOURCE, LIB_SOURCE, 'contracts/NativeSwapRail.sol', TEST_SOURCE].sort());
+  assert.deepEqual(Object.keys(compiled).sort(), [VAULT_SOURCE, LIB_SOURCE, 'contracts/NativeSwapRail.sol', 'contracts/ShieldedNativePoolDevnet.sol', TEST_SOURCE].sort());
   const vault = await newVault();
   assert.deepEqual(iface.format().sort(), vault.interface.format().sort());
   assert.equal(await vault.AUTH_DOMAIN(), AUTH_DOMAIN);

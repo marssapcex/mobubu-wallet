@@ -2,6 +2,8 @@
 
 **Chạy settlement testnet/regtest trước, không dùng tiền thật.** Đây là đường giao dịch native trong `packages/swap`, không phải `MockChainAdapter`, note Groth16 hay wrapped BTC. Sáu chiều trên **ba sổ**: Bitcoin, Ethereum, BNB Smart Chain. Không có swap nguyên tử: nhà vận hành giữ và cấp trước thanh khoản, BTC 2-of-3 cùng kiểm lệnh, ETH/BNB dùng một khóa treasury SLH-DSA riêng trên mỗi rail. Chưa audit hoặc triển khai lên mạng công khai.
 
+Đây là luồng **swap trực tiếp** (báo giá trước khi nạp), không phải [Mobubu Pool](SHIELDED-POOL.md). SDK chỉ chấp nhận các profile Bitcoin/Ethereum/BSC mainnet hoặc cặp testnet/devnet tương ứng; không dùng L2.
+
 ## Chạy lại từ mã nguồn
 
 ```sh

@@ -10,7 +10,6 @@ import { fileURLToPath } from "node:url";
 const DEFAULT_WORKER = fileURLToPath(new URL("../../../native/bin/tfhe_worker", import.meta.url));
 const MAX_FRAME_BYTES = 2 * 1024 * 1024;
 const MAX_PENDING = 32;
-const MAX_U64 = (1n << 64n) - 1n;
 const MAX_CLOUD_KEY_BYTES = 128n * 1024n * 1024n;
 
 export interface TfheParams {
@@ -135,7 +134,7 @@ export class TfheWorker extends CppTfheBackend {}
 
 type Relation = "lt" | "le" | "gt" | "ge" | "eq" | "ne";
 
-function width(w: number, max = 128): number {
+function width(w: number, max = 160): number {
   if (!Number.isInteger(w) || w < 1 || w > max) throw new RangeError(`bit width must be 1..${max}`);
   return w;
 }
@@ -144,7 +143,7 @@ function scalar(value: bigint | number, w = 64): string {
   if (typeof value === "number" && !Number.isSafeInteger(value)) throw new RangeError("use bigint for large values");
   if (typeof value !== "number" && typeof value !== "bigint") throw new TypeError("expected an unsigned integer");
   const v = BigInt(value);
-  if (v < 0n || v > MAX_U64 || v >= (1n << BigInt(w))) throw new RangeError("value exceeds bit width");
+  if (v < 0n || v >= (1n << BigInt(w))) throw new RangeError("value exceeds bit width");
   return v.toString();
 }
 
@@ -249,11 +248,11 @@ abstract class TfheOperations {
 
   /** Public/trivial constant, not a secret encryption. */
   async constant(value: bigint | number) {
-    return this.ciphertext(this.defaultWidth, "CONST", [], String(this.defaultWidth), scalar(value, this.defaultWidth));
+    return this.ciphertext(this.defaultWidth, "CONST", [], String(this.defaultWidth), scalar(value, Math.min(this.defaultWidth, 64)));
   }
 
   async addConst(a: EncryptedInt, value: bigint | number) {
-    return this.ciphertext(a.width, "ADDCONST", [a], String(a.width), a.blob, scalar(value, a.width));
+    return this.ciphertext(a.width, "ADDCONST", [a], String(a.width), a.blob, scalar(value, Math.min(a.width, 64)));
   }
 
   async mulConst(a: EncryptedInt, value: bigint | number, w = this.defaultWidth) {
@@ -280,7 +279,7 @@ abstract class TfheOperations {
 
   /** Specialized unsigned comparison when the threshold is already public. */
   async geConst(a: EncryptedInt, threshold: bigint | number) {
-    return this.ciphertext(1, "GE_CONST", [a], String(a.width), a.blob, scalar(threshold, a.width));
+    return this.ciphertext(1, "GE_CONST", [a], String(a.width), a.blob, scalar(threshold, Math.min(a.width, 64)));
   }
 
   async mux(selector: EncryptedInt, a: EncryptedInt, b: EncryptedInt) {
@@ -335,14 +334,14 @@ export class TfheClient extends TfheOperations {
   }
 
   async encrypt(value: bigint | number, bits = this.defaultWidth): Promise<EncryptedInt> {
-    width(bits, 64);
+    width(bits, 128);
     return this.ciphertext(bits, "ENC", [], String(bits), scalar(value, bits));
   }
 
   async decrypt(ct: EncryptedInt): Promise<bigint> {
     const snapshot = { ...ct };
     await this.checkInputs([snapshot]);
-    width(snapshot.width, 64);
+    width(snapshot.width, 128);
     return BigInt(await this.backend.raw("DEC", String(snapshot.width), snapshot.blob));
   }
 

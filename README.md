@@ -1,4 +1,6 @@
-# Mobubu Wallet — swap native BTC / ETH / BNB
+# Mobubu Wallet — ETH / BNB / BTC
+
+**[Mobubu Pool](docs/SHIELDED-POOL.md)** · `npm run pool`. Chỉ ETH trên Ethereum, BNB trên BNB Smart Chain và BTC trên Bitcoin. Luồng note mới: nạp không báo giá, rút cùng mạng hoặc lấy giá lúc đổi coin. **Bản devnet, chưa có rút riêng tư bằng ZK-STARK đã xác minh on-chain; không nhận tiền thật.**
 
 **[Luồng swap native](docs/NATIVE-SWAP.md):** BTC ↔ ETH, BTC ↔ BNB, ETH ↔ BNB. TFHE tính output và so `minOut` trên ciphertext; người dùng ký lệnh bằng SLH-DSA. Hai rail EVM chuyển native asset; Bitcoin xác nhận giao dịch multisig 2-of-3. Không ZK hay wrapped coin. Đã kiểm với Bitcoin Core regtest và hai EVM local độc lập, chưa triển khai công khai. [Cấu hình, cách chạy và giới hạn custody](docs/NATIVE-SWAP.md).
 
@@ -16,7 +18,7 @@ npm run build:contracts   # build/contracts.json; không gửi giao dịch
 npm test                  # vector NIST, nạp/rút thật trên EVM local, ca từ chối và oracle fixture
 npm run test:vault        # vault ETH cá nhân và SDK
 npm --prefix fhe-swap ci
-BITCOIND=/path/to/bitcoind npm run test:swap    # 6 chiều với BTC regtest + 2 EVM local
+BITCOIND=/path/to/bitcoind npm run test:swap    # 6 chiều swap trực tiếp + intake/quote của pool
 ```
 
 Artifact để triển khai local là `build/contracts.json` → `contracts/PostQuantumVault.sol` → `PostQuantumVault`; constructor không có tham số. SDK import từ `mobubu-wallet` (hoặc [`packages/client/src/index.mjs`](packages/client/src/index.mjs)). Xem [đặc tả, cách gọi SDK và gas đo được](PROTOCOL_DESIGN.md).
@@ -27,7 +29,7 @@ Artifact để triển khai local là `build/contracts.json` → `contracts/Post
 
 | Phần | Chạy được | Ranh giới |
 | --- | --- | --- |
-| [Oracle và catalog](docs/SWAP-10-MANG.md) | Catalog 10 mạng và giá tham chiếu Chainlink trên Ethereum + BSC | Chỉ đọc; không cấp quyền chi hay mở thêm mạng settlement |
+| [Oracle và catalog](docs/SWAP-10-MANG.md) | Catalog active 3 mạng; giá tham chiếu Chainlink trên Ethereum + BSC | Chỉ đọc; không cấp quyền chi hay mở thêm mạng settlement |
 | [FHE](fhe-swap/README.md) | CGGI client/evaluator cho báo giá mã hóa; BFV và probe TFHE-rs/WASM độc lập | Không quyết định quyền chi hay che số tiền đã settle on-chain |
 | [Streaming swap](fhe-swap/README.md) | NYX hub trên ba mạng gốc, minOut theo chunk, retry payout/refund trên mock chain | Không giữ tiền, không ký chain thật, không nối vault |
 

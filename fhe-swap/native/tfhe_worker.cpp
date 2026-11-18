@@ -61,7 +61,31 @@ unsigned long long parse_ull(const std::string& v) {
   return r;
 }
 
-int parse_width(const std::string& v, int maxw = 128) {
+constexpr int max_eval_bits = 160;
+
+// Wide plaintext is used only by ENC/DEC. Public multipliers/divisors stay uint64.
+using u128 = unsigned __int128;
+
+u128 parse_u128(const std::string& v) {
+  if (v.empty() || v.size() > 39) throw std::runtime_error("invalid wide integer length");
+  u128 r = 0;
+  for (char c : v) {
+    if (c < '0' || c > '9') throw std::runtime_error("invalid decimal integer");
+    unsigned d = static_cast<unsigned>(c - '0');
+    if (r > (~u128{0} - d) / 10) throw std::runtime_error("integer overflow");
+    r = r * 10 + d;
+  }
+  return r;
+}
+
+std::string decimal_u128(u128 v) {
+  char buf[39];
+  int i = sizeof(buf);
+  do { buf[--i] = static_cast<char>('0' + v % 10); v /= 10; } while (v != 0);
+  return std::string(buf + i, sizeof(buf) - i);
+}
+
+int parse_width(const std::string& v, int maxw = max_eval_bits) {
   unsigned long long w = parse_ull(v);
   if (w == 0 || w > static_cast<unsigned long long>(maxw))
     throw std::runtime_error("bit width out of range");
@@ -126,7 +150,7 @@ struct Bits {
   LweSample* s = nullptr;
   Bits() = default;
   explicit Bits(int w) : width(w) {
-    if (w <= 0 || w > 128) throw std::runtime_error("bit width out of range");
+    if (w <= 0 || w > max_eval_bits) throw std::runtime_error("bit width out of range");
     requireCloud();
     s = new_gate_bootstrapping_ciphertext_array(w, g_params);
   }
@@ -562,10 +586,10 @@ int main() {
         requireSecret();
         std::string ws, value;
         in >> ws >> value;
-        int w = parse_width(ws, 64);
-        unsigned long long v = parse_ull(value);
+        int w = parse_width(ws, 128);
+        u128 v = parse_u128(value);
         Bits b(w);
-        if (w < 64 && (v >> w) != 0) throw std::runtime_error("value exceeds bit width");
+        if (w < 128 && (v >> w) != 0) throw std::runtime_error("value exceeds bit width");
         for (int i = 0; i < w; i++) {
           bootsSymEncrypt(&b.s[i], static_cast<int32_t>((v >> i) & 1ULL), g_secret);
         }
@@ -574,14 +598,14 @@ int main() {
         requireSecret();
         std::string ws, blob;
         in >> ws >> blob;
-        int w = parse_width(ws, 64);
+        int w = parse_width(ws, 128);
         Bits b(w);
         deserialize(b, blob);
-        unsigned long long v = 0;
+        u128 v = 0;
         for (int i = 0; i < w; i++) {
-          if (bootsSymDecrypt(&b.s[i], g_secret)) v |= (1ULL << i);
+          if (bootsSymDecrypt(&b.s[i], g_secret)) v |= (u128{1} << i);
         }
-        std::cout << id << " OK " << v << "\n";
+        std::cout << id << " OK " << decimal_u128(v) << "\n";
       } else if (op == "CONST") {
         std::string ws, value;
         in >> ws >> value;

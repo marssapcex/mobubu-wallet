@@ -1,4 +1,5 @@
 import { createHash, randomBytes } from 'node:crypto';
+import { BITCOIN_GENESIS } from '../../../fhe-swap/src/network-catalog.mjs';
 import { address as btcAddress, networks, opcodes } from 'bitcoinjs-lib';
 import * as secp from 'tiny-secp256k1';
 import { AbiCoder, ZeroAddress, ZeroHash, getAddress, getBytes, hexlify, id, keccak256, sha256 } from 'ethers';
@@ -57,7 +58,8 @@ export function evmRailId(chainId, rail) {
 export function makePolicy(config) {
   const q = nonzero(config.quoter, 'quoter key');
   const b = config.BTC;
-  if (!b || !Object.hasOwn(networks, b.network)) throw new TypeError('invalid Bitcoin address network');
+  const chainPair = { bitcoin: [1n, 56n], regtest: [31_337n, 31_338n], testnet: [11_155_111n, 97n] };
+  if (!b || !Object.hasOwn(chainPair, b.network) || !Object.hasOwn(networks, b.network)) throw new TypeError('invalid Bitcoin address network');
   if (!Array.isArray(b.keys) || b.keys.length !== 3) throw new Error('Bitcoin needs three distinct compressed public keys');
   const keys = b.keys.map((k) => hex(k, 33, 'Bitcoin key')).sort();
   if (new Set(keys).size !== 3 || keys.some((k) => !secp.isPointCompressed(getBytes(k)))) throw new Error('invalid Bitcoin keys');
@@ -74,8 +76,9 @@ export function makePolicy(config) {
       depth: Number(uint(c.depth, 'EVM confirmations', 2_000n, 1n)) });
   };
   const rails = Object.freeze({ BTC: bitcoin, ETH: evm(config.ETH), BNB: evm(config.BNB) });
-  if (rails.ETH.chainId === rails.BNB.chainId || [56n, 97n].includes(rails.ETH.chainId) ||
-      [1n, 11_155_111n, 17_000n].includes(rails.BNB.chainId)) throw new Error('ETH/BNB chain identities overlap or are reversed');
+  const [ethId, bnbId] = chainPair[b.network];
+  if (rails.ETH.chainId !== ethId || rails.BNB.chainId !== bnbId ||
+      (b.network === 'bitcoin' && bitcoin.genesis !== `0x${BITCOIN_GENESIS}`)) throw new Error('wrong three-network profile; L2 and mixed networks are disabled');
   return Object.freeze({ quoter: q, rails, id: hash(['mobubu:native-swap:deployment:v1', q, rails]) });
 }
 

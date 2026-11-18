@@ -2,8 +2,9 @@ import { createHash, randomBytes } from "node:crypto";
 import { createVaultTree } from "../../client/src/zk-tree.mjs";
 import { SCALAR_FIELD, nonzero } from "../../client/src/zk-format.mjs";
 import { valueAmount, valueNoteLeaf, valueStatement } from "../../client/src/zk-value-note.mjs";
+import { parseNativeAssetArg as referenceAsset } from "../../../../../fhe-swap/src/network-catalog.mjs";
 import { CrossChainOracle } from "../../../../../packages/oracle/src/market-oracle.mjs";
-import { NATIVE_ASSET_IDS, nativeAsset } from "../../../../../fhe-swap/src/network-catalog.mjs";
+import { NATIVE_ASSET_IDS, nativeAsset } from "../../../src/network-catalog.mjs";
 
 const ROOT_HISTORY = 32;
 const QUOTE_TTL = 300;
@@ -138,7 +139,10 @@ export class MockNoteMarket {
     if (mode !== "input" && mode !== "output") throw new Error("quote mode must be input or output");
     const source = this.#account(from), target = this.#account(to);
     const terms = route(source, target, mode, valueAmount(amount), this.#fee);
-    const snapshot = source === target ? null : this.#oracle.checkQuote(from, to, terms.amountIn, terms.amountOut, now);
+    // Price is per coin in the archived simulator; keep the legacy rail IDs
+    // in settlement bindings but use the active per-coin reference feeds.
+    const snapshot = source === target ? null : this.#oracle.checkQuote(referenceAsset(source.asset.symbol),
+      referenceAsset(target.asset.symbol), terms.amountIn, terms.amountOut, now);
     const deadline = Math.min(now + QUOTE_TTL, snapshot?.validUntil ?? Infinity);
     if (validUntil !== undefined && validUntil > deadline) throw new Error("quote outlives the oracle or quote deadline");
     return Object.freeze({ from, to, mode, ...terms, oracleId: snapshot?.id ?? null,

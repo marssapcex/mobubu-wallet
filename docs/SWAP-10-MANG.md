@@ -1,6 +1,6 @@
-# BTC, ETH và BNB native trên 10 mạng — mô phỏng và đọc oracle
+# Lưu trữ: mô phỏng BTC, ETH và BNB trên 10 mạng
 
-**Không nạp tiền thật.** Oracle RPC chỉ đọc và catalog độc lập với [vault ETH SLH-DSA](../PROTOCOL_DESIGN.md), vốn chỉ nạp/rút trên cùng một EVM. [Luồng note v3 lưu trữ](NOTE-GIA-TRI.md) chỉ báo giá và ghi chi **mô phỏng** giữa 10 sổ native. [Đường settlement mới](NATIVE-SWAP.md) không dùng note và chỉ bật được ba mạng gốc BTC, ETH, BNB với rail/UTXO được cấu hình; chưa bật public. Catalog/RPC của 10 mạng không đồng nghĩa có thanh khoản thực thi trên 10 mạng.
+**Không nạp tiền thật.** Oracle RPC chỉ đọc và catalog độc lập với [vault ETH SLH-DSA](../PROTOCOL_DESIGN.md), vốn chỉ nạp/rút trên cùng một EVM. [Luồng note v3 lưu trữ](NOTE-GIA-TRI.md) chỉ báo giá và ghi chi **mô phỏng** giữa 10 sổ native. [Đường settlement mới](NATIVE-SWAP.md) không dùng note và chỉ bật được ba mạng gốc BTC, ETH, BNB với rail/UTXO được cấu hình; chưa bật public. Catalog 10 mạng chỉ dùng trong simulator lưu trữ. [Mobubu Pool hiện tại](SHIELDED-POOL.md) không có tuyến L2.
 
 ## 1. Coin và mạng là hai phần của định danh
 
@@ -19,11 +19,11 @@
 
 Robinhood mainnet dùng `4663`, **không** dùng testnet `46630`. BTC được nhận diện bằng genesis Bitcoin mainnet (`bip122`), không giả lập EVM chain ID. ETH native trên rollup là số dư dùng được trực tiếp để trả gas trên mạng đó, không phải WETH; giá tham chiếu chung không đồng nghĩa có thể chi cùng một note trên hai mạng.
 
-[Catalog](../fhe-swap/src/network-catalog.mjs) đóng đúng 10 ID, không wrapped, token hay cặp coin–mạng ngoài bảng. Có 90 chiều liên mạng (`10 × 9`) trong mô phỏng. `ETH@base → ETH@optimism` phải có dự trữ ETH độc lập trên cả hai mạng, nhận số lượng theo báo giá; không mặc định 1:1. Cùng ID, như `BNB@bsc → BNB@bsc` hoặc `BTC@bitcoin → BTC@bitcoin`, là **rút/chuyển note cùng mạng** ở ngang giá, không qua FX hay tính phí FX mô phỏng. CLI vẫn chấp nhận `ETH`, `BNB`, `BTC` cho ba mạng gốc; API ledger bắt buộc dùng `COIN@network`.
+[Catalog](../legacy/groth16/src/network-catalog.mjs) đóng đúng 10 ID, không wrapped, token hay cặp coin–mạng ngoài bảng. Có 90 chiều liên mạng (`10 × 9`) trong mô phỏng. `ETH@base → ETH@optimism` phải có dự trữ ETH độc lập trên cả hai mạng, nhận số lượng theo báo giá; không mặc định 1:1. Cùng ID, như `BNB@bsc → BNB@bsc` hoặc `BTC@bitcoin → BTC@bitcoin`, là **rút/chuyển note cùng mạng** ở ngang giá, không qua FX hay tính phí FX mô phỏng. CLI vẫn chấp nhận `ETH`, `BNB`, `BTC` cho ba mạng gốc; API ledger bắt buộc dùng `COIN@network`.
 
 ```bash
 npm ci
-npm run networks
+npm run networks   # catalog active: Bitcoin, Ethereum, BSC
 # Riêng cho simulator v3 lưu trữ:
 npm --prefix legacy/groth16 ci
 npm --prefix legacy/groth16 run demo:notes -- ETH@base ETH@arbitrum-one 0.2 0.1
@@ -43,7 +43,7 @@ Dòng `--note` không phát giao dịch; chỉ ghi một note riêng cho bên nh
 - Giới hạn nghiên cứu: tuổi *block* ≤ 30 phút trên Ethereum, ≤ 180 giây trên BSC; tuổi *round* theo policy: ETH/BTC Ethereum 5.400 giây, BNB Ethereum 7.200 giây, các feed BSC 1.800 giây. Snapshot hết hạn tại mốc sớm nhất của các giới hạn trên và 5 phút sau refresh. Đây không phải heartbeat/SLA. Feed còn hoạt động nhưng quá ngưỡng, hai feed lệch mạnh khi thị trường biến động, node lỗi hoặc đang refresh thì dừng báo giá liên mạng. Rút cùng mạng vẫn hoạt động trong mô phỏng.
 - Pool XYK quyết định số thực nhận/trừ. So giá trị USD của hai vế bằng phép nhân nguyên với đúng 8/18 chữ số; quote lệch > **200 bps** so với giá trị đầu vào bị từ chối. Bao gồm phí pool và trượt giá mô phỏng; ngưỡng chưa phải định mức production. `oracleId`, tuyến/chain đích, số tiền, đích nhận, revision và deadline nằm trong binding của proof. Sau khi chờ xác minh, ledger kiểm lại snapshot và toàn bộ quote trước commit. Đổi snapshot giữa chừng phải báo giá và chứng minh lại; không âm thầm đổi số tiền.
 
-**Đọc giá thật, không giao dịch:** đặt các biến `MOBUBU_ETHEREUM_RPC_URL` và `MOBUBU_BSC_RPC_URL` trong môi trường hoặc `.env` đã ignore; chạy `npm run oracle:read` nếu biến đã được export, hoặc `node --env-file=.env scripts/read-oracle.mjs`. Dùng endpoint hỗ trợ block hash EIP-1898. `MOBUBU_NETWORK_RPC_URL` dùng riêng cho `npm run networks -- --probe <network>`, ví dụ `robinhood` hoặc `base`. Probe chỉ so chain ID (hoặc genesis ở Bitcoin); không chứng minh node trung thực, đã sync hay giao dịch đạt finality. Không công khai Bitcoin Core RPC; với node cục bộ có thể dùng `bitcoin-cli getblockhash 0` để kiểm genesis. Trình probe Bitcoin chỉ nhận endpoint HTTPS JSON-RPC 2.0 đã cấu hình an toàn. Lượt này kiểm parser và đường lỗi bằng fixture RPC, không xác minh endpoint mainnet trực tiếp từ sandbox.
+**Đọc giá thật, không giao dịch:** đặt các biến `MOBUBU_ETHEREUM_RPC_URL` và `MOBUBU_BSC_RPC_URL` trong môi trường hoặc `.env` đã ignore; chạy `npm run oracle:read` nếu biến đã được export, hoặc `node --env-file=.env scripts/read-oracle.mjs`. Dùng endpoint hỗ trợ block hash EIP-1898. `MOBUBU_NETWORK_RPC_URL` dùng riêng cho `npm run networks -- --probe <network>`, chỉ `bitcoin`, `ethereum` hoặc `bsc`. Probe chỉ so chain ID (hoặc genesis ở Bitcoin); không chứng minh node trung thực, đã sync hay giao dịch đạt finality. Không công khai Bitcoin Core RPC; với node cục bộ có thể dùng `bitcoin-cli getblockhash 0` để kiểm genesis. Trình probe Bitcoin chỉ nhận endpoint HTTPS JSON-RPC 2.0 đã cấu hình an toàn. Lượt này kiểm parser và đường lỗi bằng fixture RPC, không xác minh endpoint mainnet trực tiếp từ sandbox.
 
 ## 3. Việc cần làm trước khi bật từng mạng
 

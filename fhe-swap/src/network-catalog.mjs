@@ -6,18 +6,11 @@ const evm = (name, chainId, symbol) => Object.freeze({
   name, family: "evm", chainId, chainRef: `eip155:${chainId}`, symbol,
 });
 
-// Mainnet identities, not a list of enabled custody/settlement adapters.
+// The only three native assets exposed by the active app. No deployment addresses.
 export const NATIVE_NETWORKS = Object.freeze({
   bitcoin: Object.freeze({ name: "Bitcoin", family: "bitcoin", chainId: null,
     chainRef: `bip122:${BITCOIN_GENESIS.slice(0, 32)}`, symbol: "BTC" }),
   ethereum: evm("Ethereum Mainnet", 1, "ETH"),
-  "arbitrum-one": evm("Arbitrum One", 42161, "ETH"),
-  optimism: evm("OP Mainnet", 10, "ETH"),
-  base: evm("Base", 8453, "ETH"),
-  "zksync-era": evm("ZKsync Era", 324, "ETH"),
-  linea: evm("Linea", 59144, "ETH"),
-  scroll: evm("Scroll", 534352, "ETH"),
-  robinhood: evm("Robinhood Chain", 4663, "ETH"),
   bsc: evm("BNB Smart Chain", 56, "BNB"),
 });
 

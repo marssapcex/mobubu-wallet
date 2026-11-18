@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { parseUnits } from "ethers";
-import { NATIVE_ASSET_IDS, nativeAsset } from "../../../fhe-swap/src/network-catalog.mjs";
+import { NATIVE_ASSET_IDS, nativeAsset } from "../src/network-catalog.mjs";
 import { setupLocalZk } from "../scripts/zk-local-setup.mjs";
 import { demoLiquidity, demoOracle } from "../../../scripts/note-fixtures.mjs";
 import { MockNoteMarket } from "../packages/sim/src/note-market.mjs";

@@ -4,36 +4,36 @@ import { AbiCoder, id } from "ethers";
 import { BITCOIN_GENESIS, NATIVE_ASSET_IDS, NATIVE_NETWORKS, nativeAsset, parseNativeAssetArg } from "../fhe-swap/src/network-catalog.mjs";
 import { chainlinkReader, probeNativeNetwork } from "../packages/oracle/src/chainlink.mjs";
 import { FEED_POLICY } from "../packages/oracle/src/feed-policy.mjs";
+import { oracleRateResolver, exactOutput } from "../packages/pool/src/withdrawal-quote.mjs";
 import { CrossChainOracle } from "../packages/oracle/src/market-oracle.mjs";
 import { fixtureObservations } from "../scripts/note-fixtures.mjs";
 
 const T = 20_000;
-const BTC = "BTC@bitcoin", ETH = "ETH@ethereum", BASE = "ETH@base";
+const BTC = "BTC@bitcoin", ETH = "ETH@ethereum", BNB = "BNB@bsc";
 const ONE = 10n ** 18n;
 const usd = 10n ** 8n;
 const qty = (n) => `0x${n.toString(16)}`;
-const EVM_IDS = { ethereum: 1, "arbitrum-one": 42161, optimism: 10, base: 8453, "zksync-era": 324, linea: 59144, scroll: 534352, robinhood: 4663, bsc: 56 };
+const EVM_IDS = { ethereum: 1, bsc: 56 };
 const rpcUrls = { ethereum: "https://eth.example.test", bsc: "https://bsc.example.test" };
 
 const check = (oracle, now = T) => oracle.checkQuote(BTC, ETH, 100_000_000n, 20n * ONE, now);
 
-test("the mainnet catalog has 10 native assets: 8 ETH networks, only BSC for BNB, only Bitcoin for BTC", () => {
+test("the mainnet catalog exposes only Bitcoin, Ethereum and BNB Smart Chain", () => {
   assert.deepEqual(Object.fromEntries(Object.entries(NATIVE_NETWORKS).filter(([, v]) => v.family === "evm")
     .map(([key, value]) => [key, value.chainId])), EVM_IDS);
-  assert.equal(NATIVE_ASSET_IDS.length, 10);
-  assert.equal(new Set(NATIVE_ASSET_IDS.map((asset) => nativeAsset(asset).chainRef)).size, 10);
-  assert.equal(NATIVE_ASSET_IDS.filter((asset) => nativeAsset(asset).symbol === "ETH").length, 8);
+  assert.equal(NATIVE_ASSET_IDS.length, 3);
+  assert.equal(new Set(NATIVE_ASSET_IDS.map((asset) => nativeAsset(asset).chainRef)).size, 3);
+  assert.equal(NATIVE_ASSET_IDS.filter((asset) => nativeAsset(asset).symbol === "ETH").length, 1);
   assert.equal(nativeAsset(BTC).decimals, 8);
   assert.equal(nativeAsset("BNB@bsc").decimals, 18);
-  assert.equal(nativeAsset("ETH@robinhood").chainRef, "eip155:4663");
+  assert.equal(nativeAsset(BNB).chainRef, "eip155:56");
   assert.equal(parseNativeAssetArg("ETH"), ETH);
-  assert.equal(parseNativeAssetArg("ETH@base"), BASE);
-  for (const name of ["WETH@base", "BNB@base", "ETH@robinhood-testnet", "ETH@4663", "constructor"]) {
+  for (const name of ["ETH@base", "ETH@arbitrum-one", "WETH@base", "BNB@base", "ETH@robinhood-testnet", "ETH@4663", "constructor"]) {
     assert.throws(() => parseNativeAssetArg(name), /unsupported native asset/);
   }
 });
 
-test("read-only probes verify the actual RPC identity for each of the ten networks", async () => {
+test("read-only probes verify the actual RPC identity for the three enabled networks", async () => {
   for (const [key, meta] of Object.entries(NATIVE_NETWORKS)) {
     const rpc = `https://${key}.example.test/`;
     async function fetcher(url, init) {
@@ -49,10 +49,10 @@ test("read-only probes verify the actual RPC identity for each of the ten networ
     assert.equal(await probeNativeNetwork(key, rpc, { fetcher }), meta);
   }
   const chainResponse = (result) => async (_url, request) => Response.json({ jsonrpc: "2.0", id: JSON.parse(request.body).id, result });
-  await assert.rejects(probeNativeNetwork("base", rpcUrls.ethereum, { fetcher: chainResponse("0x1") }), /RPC chain ID mismatch/);
-  await assert.rejects(probeNativeNetwork("robinhood", rpcUrls.ethereum, { fetcher: chainResponse(qty(46630)) }), /RPC chain ID mismatch/);
+  await assert.rejects(probeNativeNetwork("base", rpcUrls.ethereum, { fetcher: chainResponse("0x1") }), /unsupported network/);
+  await assert.rejects(probeNativeNetwork("bsc", rpcUrls.ethereum, { fetcher: chainResponse(qty(1)) }), /RPC chain ID mismatch/);
   await assert.rejects(probeNativeNetwork("bitcoin", rpcUrls.ethereum, { fetcher: chainResponse("0".repeat(64)) }), /genesis mismatch/);
-  await assert.rejects(probeNativeNetwork("base", "http://bad.example.test"), /configure an HTTPS RPC/);
+  await assert.rejects(probeNativeNetwork("bsc", "http://bad.example.test"), /configure an HTTPS RPC/);
 });
 
 test("two-source snapshots use exact BTC/ETH units, bounded quote deviation, and expire at the earliest deadline", async () => {
@@ -63,11 +63,35 @@ test("two-source snapshots use exact BTC/ETH units, bounded quote deviation, and
   assert.equal(snapshot.validUntil, T + 180);
   assert.equal(check(oracle), snapshot);
   assert.ok(Object.isFrozen(snapshot.observations[0]));
-  assert.equal(oracle.checkQuote(ETH, BASE, ONE, 98n * ONE / 100n, T), snapshot);
-  assert.throws(() => oracle.checkQuote(ETH, BASE, ONE, 98n * ONE / 100n - 1n, T), /deviates/);
-  assert.throws(() => oracle.checkQuote(ETH, BASE, ONE, 102n * ONE / 100n + 1n, T), /deviates/);
+  assert.equal(oracle.checkQuote(ETH, BNB, ONE, 12n * ONE, T), snapshot);
+  assert.throws(() => oracle.checkQuote(ETH, BNB, ONE, 1176n * ONE / 100n - 1n, T), /deviates/);
+  assert.throws(() => oracle.checkQuote(ETH, BNB, ONE, 1224n * ONE / 100n + 1n, T), /deviates/);
   assert.throws(() => check(oracle, T + 180), /expired/);
   assert.throws(() => check(oracle, T - 1), /expired/);
+});
+
+test("withdrawal rates expire at their reference snapshot and preserve native base units", async () => {
+  let now = T;
+  const oracle = new CrossChainOracle({ read: () => fixtureObservations(now), now: () => now });
+  const getRate = oracleRateResolver(oracle);
+  const route = { source: `0x${"bc".repeat(32)}`, destination: `0x${"ac".repeat(32)}`, nonce: `0x${"ae".repeat(32)}` };
+  assert.throws(() => getRate({ ...route, from: ETH, to: BNB }), /unavailable/);
+  const snap = await oracle.refresh();
+  for (const from of NATIVE_ASSET_IDS) for (const to of NATIVE_ASSET_IDS) {
+    if (from === to) continue;
+    const rate = getRate({ ...route, from, to });
+    const debit = 10n ** BigInt(nativeAsset(from).decimals);
+    const market = snap.pricesUsd18[nativeAsset(from).symbol] * 10n ** BigInt(nativeAsset(to).decimals);
+    const price = snap.pricesUsd18[nativeAsset(to).symbol];
+    const out = exactOutput({ from, to, rate }, debit);
+    assert.ok(out <= market / price);
+    assert.ok((out + 1n) * 1_000_000n * price >= 999_999n * market);
+    assert.equal(rate.validUntil, snap.validUntil);
+    assert.equal(rate.rateRef, `0x${snap.id}`);
+  }
+  assert.throws(() => getRate({ ...route, from: ETH, to: ETH }), /no quote/);
+  now = snap.validUntil;
+  assert.throws(() => getRate({ ...route, from: ETH, to: BNB }), /expired/);
 });
 
 test("snapshot rejects missing sources, duplicate feeds, stale/future/invalid rounds and price disagreement", async () => {

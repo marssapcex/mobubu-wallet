@@ -12,4 +12,8 @@ if [[ -z "${TFHE_WORKER:-}" ]]; then
 else
   test -x "$TFHE_WORKER"
 fi
-node --test test/native-swap.integration.mjs
+case "${1:-all}" in
+  all) node --test --test-concurrency=1 test/native-swap.integration.mjs test/pool-devnet.integration.mjs ;;
+  pool) node --test test/pool-devnet.integration.mjs ;;
+  *) echo 'Usage: test-native-swap.sh [all|pool]' >&2; exit 2 ;;
+esac
