@@ -1,6 +1,8 @@
 import { randomBytes } from "node:crypto";
 import { assertAsset, chainOf, type Asset, type Chain } from "../assets.js";
-import type { ChainAdapter, ThresholdSigner } from "../chains/types.js";
+import type {
+  ChainAdapter, InboundObservation, OutboundInstruction, SignedOutbound, ThresholdSigner,
+} from "../chains/types.js";
 import type { ArbBot } from "./arb.js";
 import { HubPoolBook, HubRouter, type ArbAction } from "./hub.js";
 import { PrivateOrderFlow } from "./orderflow.js";
@@ -8,13 +10,9 @@ import { TokenTreasury } from "./token.js";
 import {
   type SealedOrder,
   type ThresholdShare,
+  normalizeSealedOrder,
   ThresholdOrderOpener,
 } from "../privacy/threshold.js";
-import type {
-  InboundObservation,
-  OutboundInstruction,
-  SignedOutbound,
-} from "./types.js";
 import { fromThorUnits, toThorUnitsExact } from "./units.js";
 
 export interface StreamingSchedule {
@@ -52,7 +50,9 @@ export type StreamingSwapState =
   | "completed"
   | "partially_completed"
   | "refunded"
-  | "failed";
+  | "needs_review";
+
+export type FundingStatus = "missing" | "unconfirmed" | "changed" | "confirmed";
 
 export interface SubswapRecord {
   index: number;
@@ -64,17 +64,20 @@ export interface SubswapRecord {
   feeNyxThor: bigint;
   netOutThor: bigint;
   arbActions: ArbAction[];
+  arbFailures: number;
 }
 
 export interface StreamingSwapRecord {
   orderId: string;
   sealed: SealedOrder;
-  /** Random L1 deposit reference. Not derived from the plaintext order. */
+  /** Random mock deposit reference. Not derived from the plaintext order. */
   depositTag: string;
   state: StreamingSwapState;
   /** Vault-only plaintext after threshold opening. Never expose publicly. */
   opened?: StreamingOrderPlain;
   inbound?: InboundObservation;
+  /** Latest local observation, separate from the state of the pinned credit. */
+  fundingStatus?: FundingStatus;
   subswaps: SubswapRecord[];
   chunks?: bigint[];
   chunkMinOuts?: bigint[];
@@ -89,8 +92,10 @@ export interface StreamingSwapRecord {
   outboundReadyAt?: number;
   outbound?: OutboundInstruction;
   signed?: SignedOutbound;
+  outboundBroadcastHash?: string;
   refundOutbound?: OutboundInstruction;
   refundSigned?: SignedOutbound;
+  refundBroadcastHash?: string;
   error?: string;
   createdAt: number;
   updatedAt: number;
@@ -102,9 +107,9 @@ export interface StreamingEngineConfig {
   pools: HubPoolBook;
   feeBps: number;
   treasury?: TokenTreasury;
-  adapters: Partial<Record<Chain, ChainAdapter>>;
+  adapters: Readonly<Partial<Record<Chain, ChainAdapter>>>;
   signer: ThresholdSigner;
-  arbBots?: ArbBot[];
+  arbBots?: readonly ArbBot[];
   maxSubswaps?: number;
   /** Optional outbound delay to reduce timing linkability. */
   outboundDelaySeconds?: number;
@@ -113,9 +118,30 @@ export interface StreamingEngineConfig {
   now?: () => number;
 }
 
-function parseBigint(value: string, field: string): bigint {
-  if (!/^\d+$/.test(value)) throw new Error(`${field} must be a decimal string`);
+function parseBigint(value: unknown, field: string): bigint {
+  if (typeof value !== "string" || !/^(0|[1-9]\d{0,77})$/.test(value) || BigInt(value) >= (1n << 256n)) {
+    throw new Error(`${field} must be a canonical uint256 decimal string`);
+  }
   return BigInt(value);
+}
+
+function safeConfirmations(n: number): number {
+  if (!Number.isSafeInteger(n)) throw new Error("invalid chain confirmation count");
+  return Math.max(0, n); // BTC conflicts may be reported as negative.
+}
+
+function positiveConfirmations(n: number): number {
+  if (!Number.isSafeInteger(n) || n < 1) throw new Error("confirmation requirement must be positive");
+  return n;
+}
+
+function txIdentity(chain: Chain, txHash: string): string {
+  if (typeof txHash !== "string" || !txHash || txHash.length > 128 || /\s/.test(txHash)) {
+    throw new Error("invalid transaction identity");
+  }
+  const normalized = txHash.toLowerCase().replace(/^0x/, "");
+  if (!normalized) throw new Error("invalid transaction identity");
+  return `${chain}:${normalized}`;
 }
 
 export function parseStreamingOrder(raw: unknown): StreamingOrderPlain {
@@ -124,30 +150,30 @@ export function parseStreamingOrder(raw: unknown): StreamingOrderPlain {
   const from = assertAsset(o.from);
   const to = assertAsset(o.to);
   if (from === to) throw new Error("self-swap is not supported");
-  if (typeof o.destination !== "string" || !o.destination) {
+  if (typeof o.destination !== "string" || !o.destination.trim() || o.destination.length > 256) {
     throw new Error("destination required");
   }
-  if (typeof o.refundAddress !== "string" || !o.refundAddress) {
+  if (typeof o.refundAddress !== "string" || !o.refundAddress.trim() || o.refundAddress.length > 256) {
     throw new Error("refundAddress required");
   }
-  if (!Number.isSafeInteger(o.deadline) || (o.deadline as number) <= 0) {
+  if (!Number.isSafeInteger(o.deadline) || (o.deadline as number) <= 0 || o.deadline === Number.MAX_SAFE_INTEGER) {
     throw new Error("deadline must be unix seconds");
   }
   const streaming = o.streaming as Record<string, unknown> | undefined;
-  if (!streaming) throw new Error("streaming schedule required");
+  if (!streaming || typeof streaming !== "object") throw new Error("streaming schedule required");
   const intervalSeconds = streaming.intervalSeconds;
   const quantity = streaming.quantity;
-  if (!Number.isInteger(intervalSeconds) || (intervalSeconds as number) < 1) {
-    throw new Error("streaming.intervalSeconds must be >= 1");
+  if (!Number.isSafeInteger(intervalSeconds) || (intervalSeconds as number) < 1 || (intervalSeconds as number) > 86_400) {
+    throw new Error("streaming.intervalSeconds must be in 1..86400");
   }
-  if (!Number.isInteger(quantity) || (quantity as number) < 1) {
+  if (!Number.isSafeInteger(quantity) || (quantity as number) < 1) {
     throw new Error("streaming.quantity must be >= 1");
   }
   return {
     from,
     to,
-    amountThor: String(o.amountThor),
-    minOutThor: String(o.minOutThor),
+    amountThor: parseBigint(o.amountThor, "amountThor").toString(),
+    minOutThor: parseBigint(o.minOutThor, "minOutThor").toString(),
     destination: o.destination,
     refundAddress: o.refundAddress,
     deadline: o.deadline as number,
@@ -189,6 +215,9 @@ export function parseStreamingOrder(raw: unknown): StreamingOrderPlain {
  */
 export class StreamingHubEngine {
   private records = new Map<string, StreamingSwapRecord>();
+  // Conservative reference policy: one order per source-chain transaction.
+  // Production requires durable claims by chain + output/log index + block identity.
+  private claimedInbounds = new Map<string, string>();
   private busy = new Set<string>();
   private router: HubRouter;
   private now: () => number;
@@ -196,7 +225,17 @@ export class StreamingHubEngine {
   private outboundDelaySeconds: number;
   private epochSeconds: number;
 
-  constructor(private readonly cfg: StreamingEngineConfig) {
+  private readonly cfg: Readonly<StreamingEngineConfig>;
+
+  constructor(cfg: StreamingEngineConfig) {
+    // The pool book and mock adapters are intentionally stateful. Do not let
+    // edits to the caller's config replace the registered watcher/signer,
+    // treasury, opener or rebalance policy partway through an order.
+    this.cfg = {
+      ...cfg,
+      adapters: { ...cfg.adapters },
+      arbBots: [...(cfg.arbBots ?? [])],
+    };
     // Fees are collected only at final settlement, and only for executed
     // subswaps. Failed/unexecuted input is refunded without protocol fees.
     this.router = new HubRouter(cfg.pools, cfg.feeBps);
@@ -204,20 +243,21 @@ export class StreamingHubEngine {
     this.maxSubswaps = cfg.maxSubswaps ?? 1440;
     this.outboundDelaySeconds = cfg.outboundDelaySeconds ?? 0;
     this.epochSeconds = cfg.epochSeconds ?? 0;
-    if (!Number.isInteger(this.maxSubswaps) || this.maxSubswaps < 1) {
+    if (!Number.isSafeInteger(this.maxSubswaps) || this.maxSubswaps < 1) {
       throw new Error("maxSubswaps must be >= 1");
     }
-    if (!Number.isInteger(this.outboundDelaySeconds) || this.outboundDelaySeconds < 0) {
+    if (!Number.isSafeInteger(this.outboundDelaySeconds) || this.outboundDelaySeconds < 0) {
       throw new Error("outboundDelaySeconds must be >= 0");
     }
-    if (!Number.isInteger(this.epochSeconds) || this.epochSeconds < 0) {
+    if (!Number.isSafeInteger(this.epochSeconds) || this.epochSeconds < 0) {
       throw new Error("epochSeconds must be >= 0");
     }
   }
 
   submitSealed(sealed: SealedOrder): string {
-    const orderId = this.cfg.orderFlow.submit(sealed);
-    if (this.records.has(orderId)) throw new Error("order already exists");
+    const envelope = normalizeSealedOrder(sealed);
+    this.cfg.opener.requireCommittee(envelope.committeeId);
+    const orderId = this.cfg.orderFlow.submit(envelope);
     const now = this.now();
     const openableAt =
       this.epochSeconds === 0
@@ -225,7 +265,7 @@ export class StreamingHubEngine {
         : Math.floor(now / this.epochSeconds) * this.epochSeconds + this.epochSeconds;
     this.records.set(orderId, {
       orderId,
-      sealed,
+      sealed: envelope,
       depositTag: randomBytes(16).toString("hex"),
       state: "sealed",
       subswaps: [],
@@ -240,18 +280,19 @@ export class StreamingHubEngine {
   }
 
   submitShare(orderId: string, share: ThresholdShare): void {
-    this.mustGet(orderId);
+    const record = this.mustGet(orderId);
+    if (record.opened || this.isTerminal(record.state)) throw new Error("order no longer accepts shares");
     this.cfg.opener.submitShare(orderId, share);
   }
 
   get(orderId: string): StreamingSwapRecord | undefined {
-    return this.records.get(orderId);
+    const record = this.records.get(orderId);
+    return record ? structuredClone(record) : undefined;
   }
 
   /**
-   * Random deposit reference the client puts in the L1 deposit memo/payment id.
-   * It is not the order id and is not derived from the plaintext order.
-   * Production vaults should map this to a fresh one-time deposit address.
+   * Random reference for matching simulated inbounds. It is neither a chain
+   * address nor derived from the order id/plaintext.
    */
   depositTag(orderId: string): string {
     return this.mustGet(orderId).depositTag;
@@ -265,42 +306,58 @@ export class StreamingHubEngine {
   }
 
   async observeInbound(orderId: string): Promise<StreamingSwapRecord> {
-    const record = this.mustGet(orderId);
-    if (record.state !== "sealed" && record.state !== "inbound_observed") {
-      return record;
-    }
+    return this.withLock(orderId, () => this.scanInbound(this.mustGet(orderId)));
+  }
+
+  private async scanInbound(record: StreamingSwapRecord): Promise<StreamingSwapRecord> {
+    if (record.state !== "sealed" && record.state !== "inbound_observed") return record;
     for (const adapter of this.adapters()) {
       for (const asset of adapter.assets) {
-        const obs = await adapter.scanInbound(record.depositTag, asset);
-        if (!obs) continue;
-        if (obs.intentId !== record.depositTag) {
-          throw new Error("inbound deposit tag mismatch");
-        }
-        if (obs.chain !== adapter.chain || obs.asset !== asset) {
+        const found = await adapter.scanInbound(record.depositTag, asset);
+        if (!found) continue;
+        const obs = { ...found };
+        if (obs.depositTag !== record.depositTag) throw new Error("inbound deposit tag mismatch");
+        if (obs.chain !== adapter.chain || obs.asset !== asset || chainOf(asset) !== adapter.chain) {
           throw new Error("inbound chain/asset mismatch");
         }
-        record.inbound = { ...obs };
+        if (typeof obs.amountBaseUnits !== "bigint" || obs.amountBaseUnits <= 0n) {
+          return this.needsReview(record, "non-positive inbound amount");
+        }
+        const inboundId = txIdentity(obs.chain, obs.txHash);
+        const required = positiveConfirmations(adapter.requiredConfirmations(asset));
+        const confirmations = safeConfirmations(await adapter.getConfirmations(obs.txHash));
+        record.inbound = { ...obs, confirmations };
         record.state = "inbound_observed";
+        record.fundingStatus = confirmations >= required ? "confirmed" : "unconfirmed";
         record.updatedAt = this.now();
-        const required = adapter.requiredConfirmations(asset);
-        const confirmations = await adapter.getConfirmations(obs.txHash);
-        record.inbound.confirmations = confirmations;
         if (confirmations >= required) {
+          const claimed = this.claimedInbounds.get(inboundId);
+          if (claimed !== undefined && claimed !== record.orderId) {
+            return this.needsReview(record, "inbound transaction already credited");
+          }
+          this.claimedInbounds.set(inboundId, record.orderId);
           record.state = "inbound_confirmed";
-          record.updatedAt = this.now();
         }
         return record;
       }
     }
+    // A transaction can disappear before finality. Do not retain a refundable
+    // observation after the watcher no longer sees it.
+    record.inbound = undefined;
+    record.fundingStatus = "missing";
+    record.state = "sealed";
     return record;
   }
 
   async start(orderId: string): Promise<StreamingSwapRecord> {
-    const record = this.mustGet(orderId);
+    return this.withLock(orderId, () => this.openConfirmed(this.mustGet(orderId)));
+  }
+
+  private async openConfirmed(record: StreamingSwapRecord): Promise<StreamingSwapRecord> {
+    const { orderId } = record;
     if (record.state !== "inbound_confirmed" || !record.inbound) {
       throw new Error("inbound not confirmed");
     }
-    if (record.opened) return record;
     if (this.now() < record.openableAt) {
       throw new Error("order epoch not openable yet");
     }
@@ -308,14 +365,25 @@ export class StreamingHubEngine {
       throw new Error("not enough threshold shares");
     }
 
-    const plain = parseStreamingOrder(
-      this.cfg.opener.open(orderId, record.sealed),
-    );
+    // Once credited, the original observation stays pinned even if funding is
+    // no longer current. Do not resume scanning for a substitute deposit.
+    if (!(await this.fundingIsCurrent(record))) return record;
+
+    let plain: StreamingOrderPlain;
+    try {
+      plain = parseStreamingOrder(this.cfg.opener.open(orderId, record.sealed));
+    } catch {
+      return this.needsReview(record, "could not open a valid order / refund destination");
+    }
     record.opened = plain;
-    const amountThor = parseBigint(plain.amountThor, "amountThor");
-    const minOutThor = parseBigint(plain.minOutThor, "minOutThor");
-    if (amountThor <= 0n) throw new Error("amount must be positive");
-    if (minOutThor < 0n) throw new Error("minOut must be non-negative");
+    // Do not issue a refund in the asset declared by the order if the inbound
+    // is a different asset. Ownership/destination on that chain is not known.
+    if (record.inbound.asset !== plain.from) {
+      return this.needsReview(record, "inbound asset does not match sealed order");
+    }
+    const amountThor = BigInt(plain.amountThor);
+    const minOutThor = BigInt(plain.minOutThor);
+    if (amountThor === 0n) return this.refundRecord(record, "amount must be positive");
     if (plain.streaming.quantity > this.maxSubswaps) {
       return this.refundRecord(record, "streaming quantity exceeds maxSubswaps");
     }
@@ -335,14 +403,13 @@ export class StreamingHubEngine {
     if (observedThor !== amountThor) {
       return this.refundRecord(record, "inbound amount does not match sealed order");
     }
-    if (record.inbound.asset !== plain.from) {
-      return this.refundRecord(record, "inbound asset does not match sealed order");
+    try {
+      this.adapterFor(plain.to);
+      this.cfg.pools.get(plain.from);
+      this.cfg.pools.get(plain.to);
+    } catch {
+      return this.refundRecord(record, "route not available");
     }
-
-    this.adapterFor(plain.from);
-    this.adapterFor(plain.to);
-    this.cfg.pools.get(plain.from);
-    this.cfg.pools.get(plain.to);
 
     const n = BigInt(plain.streaming.quantity);
     const base = amountThor / n;
@@ -369,20 +436,18 @@ export class StreamingHubEngine {
       let record = this.mustGet(orderId);
       if (this.isTerminal(record.state)) return record;
       if (record.state === "sealed" || record.state === "inbound_observed") {
-        record = await this.observeInbound(orderId);
+        record = await this.scanInbound(record);
       }
       if (record.state === "inbound_confirmed") {
         if (this.now() < record.openableAt) return record;
         if (!this.cfg.opener.canOpen(orderId)) return record;
-        record = await this.start(orderId);
+        record = await this.openConfirmed(record);
       }
       if (record.state === "streaming") {
         record = await this.executeDueSubswaps(record);
       }
-      if (record.state === "awaiting_outbound") {
-        if (this.now() >= (record.outboundReadyAt ?? 0)) {
-          record = await this.finalize(record);
-        }
+      if (this.isSettling(record) && this.now() >= record.outboundReadyAt!) {
+        record = await this.finalize(record);
       }
       return record;
     });
@@ -404,8 +469,8 @@ export class StreamingHubEngine {
       const now = this.now();
       let next: number | undefined;
       if (record.state === "inbound_confirmed") next = record.openableAt;
-      if (record.state === "streaming") next = record.nextSubswapAt;
-      if (record.state === "awaiting_outbound") next = record.outboundReadyAt;
+      if (record.state === "streaming") next = Math.min(record.nextSubswapAt!, record.opened!.deadline + 1);
+      if (this.isSettling(record)) next = record.outboundReadyAt;
       if (next !== undefined && next > now && opts?.advanceTime) {
         opts.advanceTime(next - now);
         continue;
@@ -417,243 +482,191 @@ export class StreamingHubEngine {
     throw new Error("streaming run exceeded maxSteps");
   }
 
-  /** Cancel/refund. If subswaps already executed, settle partially. */
+  /** Internal cancel/refund. Callers must authenticate cancellations externally. */
   async refund(orderId: string, reason: string): Promise<StreamingSwapRecord> {
     return this.withLock(orderId, async () => {
       const record = this.mustGet(orderId);
       if (this.isTerminal(record.state)) return record;
-      if (record.completedSubswaps > 0) {
-        record.error = reason;
-        record.state = "awaiting_outbound";
-        record.outboundReadyAt = this.now() + this.outboundDelaySeconds;
-        return this.finalize(record);
+      if (!this.isSettling(record)) {
+        if (record.state !== "streaming" || !record.opened || !record.inbound) {
+          throw new Error("cannot refund before a confirmed, opened inbound");
+        }
+        this.stopStream(record, reason);
       }
-      return this.refundRecord(record, reason);
+      return this.now() >= record.outboundReadyAt! ? this.finalize(record) : record;
     });
   }
 
-  private async executeDueSubswaps(
-    record: StreamingSwapRecord,
-  ): Promise<StreamingSwapRecord> {
+  private async executeDueSubswaps(record: StreamingSwapRecord): Promise<StreamingSwapRecord> {
     const plain = record.opened;
     const chunks = record.chunks;
     const chunkMinOuts = record.chunkMinOuts;
-    if (!plain || !chunks || !chunkMinOuts || record.remainingInThor === undefined) {
+    if (!plain || !chunks || !chunkMinOuts || record.remainingInThor === undefined || record.nextSubswapAt === undefined) {
       throw new Error("stream not started");
     }
+    if (this.now() > plain.deadline) return this.stopStream(record, "deadline passed during streaming");
+    if (this.now() < record.nextSubswapAt) return record;
+    // A reorg or watcher loss pauses further execution. Already committed
+    // chunks are not rolled back; the reference engine has no reorg ledger.
+    if (!(await this.fundingIsCurrent(record))) return record;
+    const now = this.now();
+    if (now > plain.deadline) return this.stopStream(record, "deadline passed during streaming");
+    const index = record.completedSubswaps;
+    const amountInThor = chunks[index];
+    const minOutThor = chunkMinOuts[index];
 
-    while (
-      record.state === "streaming" &&
-      record.completedSubswaps < chunks.length &&
-      this.now() >= (record.nextSubswapAt ?? 0)
-    ) {
-      if (this.now() > plain.deadline) {
-        return this.stopStream(record, "deadline passed during streaming");
-      }
-      const index = record.completedSubswaps;
-      const amountInThor = chunks[index];
-      const minOutThor = chunkMinOuts[index];
+    // The quote and execution are synchronous; no external await can change
+    // reserves between the limit check and the committed trade.
+    let quote;
+    try {
+      const candidate = this.router.quote(plain.from, plain.to, amountInThor);
+      if (candidate.netOutThor < minOutThor) return this.stopStream(record, "subswap minOut not met");
+      quote = this.router.execute(plain.from, plain.to, amountInThor);
+    } catch (err) {
+      return this.stopStream(record, `subswap rejected: ${err instanceof Error ? err.message : String(err)}`);
+    }
 
-      let quote;
-      try {
-        quote = this.router.quote(plain.from, plain.to, amountInThor);
-      } catch (err) {
-        return this.stopStream(
-          record,
-          `subswap quote failed: ${err instanceof Error ? err.message : String(err)}`,
-        );
-      }
-      if (quote.netOutThor < minOutThor) {
-        return this.stopStream(record, "subswap minOut not met");
-      }
+    const fill: SubswapRecord = {
+      index, scheduledAt: record.nextSubswapAt, executedAt: now, amountInThor, minOutThor,
+      intermediateNyxThor: quote.intermediateNyxThor, feeNyxThor: quote.feeNyxThor,
+      netOutThor: quote.netOutThor, arbActions: [], arbFailures: 0,
+    };
+    record.subswaps.push(fill);
+    record.totalNetOutThor += quote.netOutThor;
+    record.totalFeeNyxThor += quote.feeNyxThor;
+    record.remainingInThor -= amountInThor;
+    record.completedSubswaps += 1;
+    record.updatedAt = now;
 
-      try {
-        this.router.execute(plain.from, plain.to, amountInThor);
-      } catch (err) {
-        return this.stopStream(
-          record,
-          `subswap failed: ${err instanceof Error ? err.message : String(err)}`,
-        );
-      }
-
-      const arbActions: ArbAction[] = [];
-      const affected = [
-        this.cfg.pools.get(plain.from),
-        this.cfg.pools.get(plain.to),
-      ];
-      for (const bot of this.cfg.arbBots ?? []) {
-        for (const pool of affected) {
-          const action = bot.rebalance(pool);
-          if (action) arbActions.push(action);
+    // An optional bot failing after the trade must not make the already
+    // committed chunk eligible for execution again.
+    for (const bot of this.cfg.arbBots ?? []) {
+      for (const asset of [plain.from, plain.to]) {
+        try {
+          const action = bot.rebalance(this.cfg.pools.get(asset));
+          if (action) fill.arbActions.push(action);
+        } catch {
+          fill.arbFailures++;
         }
       }
-
-      record.subswaps.push({
-        index,
-        scheduledAt: record.nextSubswapAt ?? this.now(),
-        executedAt: this.now(),
-        amountInThor,
-        minOutThor,
-        intermediateNyxThor: quote.intermediateNyxThor,
-        feeNyxThor: quote.feeNyxThor,
-        netOutThor: quote.netOutThor,
-        arbActions,
-      });
-      record.totalNetOutThor += quote.netOutThor;
-      record.totalFeeNyxThor += quote.feeNyxThor;
-      record.remainingInThor -= amountInThor;
-      record.completedSubswaps += 1;
-      record.updatedAt = this.now();
-
-      if (record.completedSubswaps >= chunks.length) {
-        record.streamCompletedAt = this.now();
-        record.outboundReadyAt = this.now() + this.outboundDelaySeconds;
-        record.state = "awaiting_outbound";
-      } else {
-        record.nextSubswapAt =
-          (record.nextSubswapAt ?? this.now()) + plain.streaming.intervalSeconds;
-      }
     }
+    if (record.completedSubswaps === chunks.length) return this.stopStream(record);
+    // Do not process a burst of overdue chunks against the same market state.
+    record.nextSubswapAt = now + plain.streaming.intervalSeconds;
     return record;
   }
 
-  private stopStream(
-    record: StreamingSwapRecord,
-    reason: string,
-  ): StreamingSwapRecord {
+  /** Build both legs once. After this point, retries may not reprice or resize. */
+  private stopStream(record: StreamingSwapRecord, reason?: string): StreamingSwapRecord {
+    const { opened, inbound, remainingInThor, totalNetOutThor } = record;
+    if (!opened || !inbound || inbound.asset !== opened.from) throw new Error("missing settlement context");
+    const now = this.now();
+    const instruction = (asset: Asset, to: string, amountBaseUnits: bigint): OutboundInstruction => ({
+      orderId: record.orderId, chain: chainOf(asset), asset, to, amountBaseUnits, memoHash: opened.memoHash,
+    });
+    if (totalNetOutThor > 0n) {
+      record.outbound = instruction(opened.to, opened.destination, fromThorUnits(opened.to, totalNetOutThor));
+    }
+    const refund = remainingInThor === undefined ? inbound.amountBaseUnits : fromThorUnits(opened.from, remainingInThor);
+    if (refund > 0n) record.refundOutbound = instruction(opened.from, opened.refundAddress, refund);
     record.error = reason;
-    record.streamCompletedAt = this.now();
-    record.outboundReadyAt = this.now() + this.outboundDelaySeconds;
+    record.streamCompletedAt = now;
+    record.outboundReadyAt = now + this.outboundDelaySeconds;
     record.state = "awaiting_outbound";
-    record.updatedAt = this.now();
+    record.updatedAt = now;
     return record;
   }
 
-  private async finalize(
-    record: StreamingSwapRecord,
-  ): Promise<StreamingSwapRecord> {
-    const plain = record.opened;
-    if (!plain || record.remainingInThor === undefined || record.amountThor === undefined) {
-      throw new Error("missing opened order");
-    }
-    const minOutThor = parseBigint(plain.minOutThor, "minOutThor");
-    const remaining = record.remainingInThor;
-    const netOut = record.totalNetOutThor;
-
-    if (netOut === 0n) {
-      return this.refundRecord(record, record.error ?? "streaming minOut not met");
-    }
-
-    const outbound: OutboundInstruction = {
-      intentId: record.orderId,
-      chain: chainOf(plain.to),
-      asset: plain.to,
-      to: plain.destination,
-      amountBaseUnits: fromThorUnits(plain.to, netOut),
-      memoHash: plain.memoHash,
-    };
-    record.outbound = outbound;
-    const adapter = this.adapterFor(plain.to);
-    const unsigned = await adapter.buildOutbound(outbound);
-    const signed = await this.cfg.signer.sign(adapter.chain, plain.to, unsigned);
-    record.signed = {
-      intentId: record.orderId,
-      chain: adapter.chain,
-      rawTx: signed.rawTx,
-      txHash: signed.txHash,
-    };
-    record.state = "outbound_signed";
-    record.updatedAt = this.now();
-
-    const txHash = await adapter.broadcast(signed.rawTx);
-    record.signed.txHash = txHash;
-    record.state = "outbound_broadcast";
-    record.updatedAt = this.now();
-
-    if (remaining > 0n) {
-      const refundAdapter = this.adapterFor(plain.from);
-      const refund: OutboundInstruction = {
-        intentId: record.orderId,
-        chain: refundAdapter.chain,
-        asset: plain.from,
-        to: plain.refundAddress,
-        amountBaseUnits: fromThorUnits(plain.from, remaining),
-        memoHash: plain.memoHash,
-      };
-      record.refundOutbound = refund;
-      const refundUnsigned = await refundAdapter.buildOutbound(refund);
-      const refundSigned = await this.cfg.signer.sign(
-        refundAdapter.chain,
-        plain.from,
-        refundUnsigned,
-      );
-      record.refundSigned = {
-        intentId: record.orderId,
-        chain: refundAdapter.chain,
-        rawTx: refundSigned.rawTx,
-        txHash: refundSigned.txHash,
-      };
-      const refundHash = await refundAdapter.broadcast(refundSigned.rawTx);
-      record.refundSigned.txHash = refundHash;
-    }
+  private async finalize(record: StreamingSwapRecord): Promise<StreamingSwapRecord> {
+    const paid = await this.settleLeg(record, "payout");
+    const refunded = await this.settleLeg(record, "refund");
+    // Track any already signed transactions, but do not finalize accounting if
+    // the source funding is no longer confirmed. There is no reorg ledger.
+    if (!paid || !refunded || !(await this.fundingIsCurrent(record))) return record;
 
     this.cfg.treasury?.collectFeeNyx(record.totalFeeNyxThor);
-
-    if (remaining === 0n && netOut >= minOutThor) {
-      record.state = "completed";
-    } else if (remaining > 0n) {
-      record.state = "partially_completed";
-    } else {
-      // Should be unreachable because proportional limits enforce total minOut.
-      record.state = "failed";
-      record.error = record.error ?? "total minOut not met after full execution";
-    }
+    record.state = record.outbound
+      ? record.refundOutbound ? "partially_completed" : "completed"
+      : "refunded";
     record.updatedAt = this.now();
     return record;
   }
 
-  private async refundRecord(
-    record: StreamingSwapRecord,
-    reason: string,
-  ): Promise<StreamingSwapRecord> {
-    if (this.isTerminal(record.state)) return record;
-    if (record.completedSubswaps > 0) {
-      throw new Error("cannot full-refund after subswaps executed; use partial settlement");
-    }
-    if (!record.inbound) {
-      record.state = "failed";
-      record.error = reason;
+  private async settleLeg(record: StreamingSwapRecord, leg: "payout" | "refund"): Promise<boolean> {
+    const [planField, signedField, broadcastField] = leg === "payout"
+      ? ["outbound", "signed", "outboundBroadcastHash"] as const
+      : ["refundOutbound", "refundSigned", "refundBroadcastHash"] as const;
+    const instruction = record[planField];
+    if (!instruction) return true;
+    const adapter = this.adapterFor(instruction.asset);
+    const required = positiveConfirmations(adapter.requiredOutboundConfirmations?.(instruction.asset)
+      ?? adapter.requiredConfirmations(instruction.asset));
+    let signed = record[signedField];
+    if (!signed) {
+      if (!(await this.fundingIsCurrent(record))) return false;
+      const unsigned = await adapter.buildOutbound({ ...instruction });
+      // Check before signing each new leg, not just before the first broadcast.
+      // A reply/confirmation for the payout can take time while funding changes.
+      if (!(await this.fundingIsCurrent(record))) return false;
+      const result = await this.cfg.signer.sign(adapter.chain, instruction.asset, unsigned);
+      if (typeof result.rawTx !== "string" || !result.rawTx) throw new Error("signer returned an invalid transaction");
+      txIdentity(adapter.chain, result.txHash);
+      signed = record[signedField] = { ...result, chain: adapter.chain, orderId: record.orderId };
+      record.state = "outbound_signed";
       record.updatedAt = this.now();
-      return record;
     }
-    const plain = record.opened;
-    if (!plain) {
-      record.state = "failed";
-      record.error = `${reason}; no opened refund address`;
+    let txHash = record[broadcastField];
+    if (!txHash) {
+      // A signer may have returned after the observation was lost. Retain the
+      // bytes but do not publish them while the funding snapshot is uncertain.
+      if (!(await this.fundingIsCurrent(record))) return false;
+      // An RPC may accept the bytes then lose its response. Keep the signed
+      // bytes over failure and rebroadcast those exact bytes on the next tick.
+      txHash = await adapter.broadcast(signed.rawTx);
+      if (txIdentity(adapter.chain, txHash) !== txIdentity(adapter.chain, signed.txHash)) {
+        throw new Error(`${leg} broadcast returned a different transaction ID`);
+      }
+      record[broadcastField] = txHash;
+      record.state = "outbound_broadcast";
       record.updatedAt = this.now();
-      return record;
     }
-    const adapter = this.adapterFor(plain.from);
-    const refund: OutboundInstruction = {
-      intentId: record.orderId,
-      chain: adapter.chain,
-      asset: plain.from,
-      to: plain.refundAddress,
-      amountBaseUnits: record.inbound.amountBaseUnits,
-      memoHash: plain.memoHash,
-    };
-    record.refundOutbound = refund;
-    const unsigned = await adapter.buildOutbound(refund);
-    const signed = await this.cfg.signer.sign(adapter.chain, plain.from, unsigned);
-    record.refundSigned = {
-      intentId: record.orderId,
-      chain: adapter.chain,
-      rawTx: signed.rawTx,
-      txHash: signed.txHash,
-    };
-    const txHash = await adapter.broadcast(signed.rawTx);
-    record.refundSigned.txHash = txHash;
-    record.state = "refunded";
+    return safeConfirmations(await adapter.getConfirmations(txHash)) >= required;
+  }
+
+  private refundRecord(record: StreamingSwapRecord, reason: string): StreamingSwapRecord {
+    if (record.state !== "inbound_confirmed" || record.completedSubswaps !== 0) {
+      throw new Error("full refund requires an unused confirmed inbound");
+    }
+    return this.stopStream(record, reason);
+  }
+
+  private async fundingIsCurrent(record: StreamingSwapRecord): Promise<boolean> {
+    const credit = record.inbound;
+    if (!credit) return false;
+    const source = this.adapterFor(credit.asset);
+    const observation = await source.scanInbound(record.depositTag, credit.asset);
+    if (!observation || observation.depositTag !== record.depositTag ||
+        observation.chain !== credit.chain || observation.asset !== credit.asset ||
+        observation.amountBaseUnits !== credit.amountBaseUnits ||
+        txIdentity(observation.chain, observation.txHash) !== txIdentity(credit.chain, credit.txHash)) {
+      record.fundingStatus = observation ? "changed" : "missing";
+      credit.confirmations = 0;
+      return false;
+    }
+    const confirmations = safeConfirmations(await source.getConfirmations(credit.txHash));
+    credit.confirmations = confirmations;
+    const confirmed = confirmations >= positiveConfirmations(source.requiredConfirmations(credit.asset));
+    record.fundingStatus = confirmed ? "confirmed" : "unconfirmed";
+    return confirmed;
+  }
+
+  private isSettling(record: StreamingSwapRecord): boolean {
+    return record.state === "awaiting_outbound" || record.state === "outbound_signed" || record.state === "outbound_broadcast";
+  }
+
+  private needsReview(record: StreamingSwapRecord, reason: string): StreamingSwapRecord {
+    this.cfg.opener.discard(record.orderId);
+    record.state = "needs_review";
     record.error = reason;
     record.updatedAt = this.now();
     return record;
@@ -664,7 +677,7 @@ export class StreamingHubEngine {
       state === "completed" ||
       state === "partially_completed" ||
       state === "refunded" ||
-      state === "failed"
+      state === "needs_review"
     );
   }
 
@@ -691,7 +704,7 @@ export class StreamingHubEngine {
     if (this.busy.has(id)) throw new Error(`order ${id} already in progress`);
     this.busy.add(id);
     try {
-      return await fn();
+      return structuredClone(await fn());
     } finally {
       this.busy.delete(id);
     }

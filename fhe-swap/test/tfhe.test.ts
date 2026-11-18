@@ -1,9 +1,9 @@
-import { describe, it, afterEach } from "node:test";
+import { describe, it, after, afterEach } from "node:test";
 import assert from "node:assert/strict";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { TfheWorker, makeTfhe, type EncryptedInt } from "../src/fhe/tfhe.js";
+import { TfheWorker, makeTfhe } from "../src/fhe/tfhe.js";
 
 const WORKER = path.join(process.cwd(), "native", "bin", "tfhe_worker");
 
@@ -13,14 +13,9 @@ if (!fs.existsSync(WORKER)) {
   );
 }
 
-function cloudKeyPath(suffix = ""): string {
-  return path.join(os.tmpdir(), `tfhe-test-${suffix}-${process.pid}.key`);
-}
-
-async function expectOk(proc: TfheWorker, op: string, ...args: string[]): Promise<string[]> {
-  const payload = await proc.raw(op, ...args);
-  return payload.split(" ");
-}
+const keys = fs.mkdtempSync(path.join(os.tmpdir(), "mobubu-tfhe-suite-"));
+after(() => fs.rmSync(keys, { recursive: true, force: true }));
+function cloudKeyPath(suffix: string): string { return path.join(keys, `${suffix}.key`); }
 
 describe("TFHE worker (CGGI gate bootstrapping)", () => {
   let proc: TfheWorker | null = null;
@@ -97,10 +92,11 @@ describe("TFHE worker (CGGI gate bootstrapping)", () => {
     assert.ok(Number(st.split("gates ")[1].split(" ")[0]) > 0, st);
   });
 
-  it("evaluator role refuses ENC/DEC but computes on ciphertexts", async () => {
+  it("evaluator role refuses ENC/DEC but computes on ciphertexts", async (t) => {
     // Client produces a cloud key.
     const ck = cloudKeyPath("eval");
     const client = new TfheWorker(WORKER);
+    t.after(() => client.close());
     const kg = await client.raw("KEYGEN", "128", ck);
     assert.ok(kg.startsWith("client 128 "), kg);
 
@@ -136,17 +132,6 @@ describe("TFHE worker (CGGI gate bootstrapping)", () => {
     // Decrypt with the client to verify the evaluator's encrypted sum is correct.
     assert.equal(await decryptThrough(client, Number(add[0]), add[1]), 30n);
 
-    try {
-      client.close();
-    } catch {
-      /* ignore */
-    }
-    try {
-      proc.close();
-    } catch {
-      /* ignore */
-    }
-    proc = null;
   });
 
   it("high-level TfheClient round-trips add/mul/cmp/mux", async () => {
@@ -166,7 +151,7 @@ describe("TFHE worker (CGGI gate bootstrapping)", () => {
       assert.equal(await crypto.decrypt(await crypto.cmp(a, b, "gt")), 1n);
       assert.equal(await crypto.decrypt(await crypto.cmp(a, b, "eq")), 0n);
       assert.equal(
-        await crypto.decrypt(await crypto.mux(await crypto.encrypt(1n), a, b)),
+        await crypto.decrypt(await crypto.mux(await crypto.cmp(a, b, "gt"), a, b)),
         157n,
       );
       assert.equal(await crypto.decrypt(await crypto.mulConst(a, 3n, 12)), 471n);

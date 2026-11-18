@@ -13,8 +13,8 @@
 //   evaluator - loads ONLY the cloud (evaluation) key; DEC/ENC are refused
 //
 // Integers are encrypted bit-sliced: an w-bit unsigned integer is an array of
-// w LWE ciphertexts, each encrypting one bit. Every gate is bootstrapped, so
-// circuit depth is unbounded (fully homomorphic, not leveled).
+// w LWE ciphertexts, each encrypting one bit. Nonlinear gates bootstrap;
+// copies, NOT, constants and shifts do not. This is a local research backend.
 
 #include <cstdio>
 #include <cstdlib>
@@ -27,6 +27,11 @@
 #include <chrono>
 #include <climits>
 #include <stdexcept>
+#include <memory>
+#include <cmath>
+#include <fcntl.h>
+#include <unistd.h>
+#include "tfhe_generic_streams.h"
 
 #include "tfhe.h"
 #include "tfhe_io.h"
@@ -114,12 +119,15 @@ std::vector<unsigned char> b64decode(const std::string& in) {
   return out;
 }
 
+void requireCloud();
+
 struct Bits {
   int width = 0;
   LweSample* s = nullptr;
   Bits() = default;
   explicit Bits(int w) : width(w) {
     if (w <= 0 || w > 128) throw std::runtime_error("bit width out of range");
+    requireCloud();
     s = new_gate_bootstrapping_ciphertext_array(w, g_params);
   }
   ~Bits() {
@@ -131,8 +139,6 @@ struct Bits {
 
 void gate() { g_gates++; }
 void linear() { g_linear++; }
-void copy_bit(LweSample* dst, const LweSample* src);
-
 void copy_bit(LweSample* dst, const LweSample* src) {
   memcpy(dst->a, src->a, sizeof(Torus32) * g_params->in_out_params->n);
   dst->b = src->b;
@@ -170,6 +176,16 @@ void deserialize(Bits& b, const std::string& blob) {
   const size_t sample_bytes = 4 + 4 * n + 4 + 8;
   if (raw.size() != static_cast<size_t>(b.width) * sample_bytes) {
     throw std::runtime_error("ciphertext byte length does not match width/params");
+  }
+  for (int i = 0; i < b.width; ++i) {
+    const unsigned char* sample = raw.data() + i * sample_bytes;
+    int32_t uid;
+    double variance;
+    memcpy(&uid, sample, sizeof(uid));
+    memcpy(&variance, sample + sample_bytes - sizeof(variance), sizeof(variance));
+    if (uid != LWE_SAMPLE_TYPE_UID || !std::isfinite(variance) || variance < 0) {
+      throw std::runtime_error("invalid LWE sample header or variance");
+    }
   }
   FILE* f = fmemopen(raw.data(), raw.size(), "r");
   if (!f) throw std::runtime_error("fmemopen failed");
@@ -237,22 +253,44 @@ void sub_into(Bits& out, const Bits& a, const Bits& b) {
   delete_gate_bootstrapping_ciphertext(bout);
 }
 
-// unsigned borrow-out of a-b : 1 iff a < b
+// Unsigned borrow-out (a < b). Do not evaluate the unused difference bits.
+// At the least-significant bit the borrow-in is known to be zero.
 void borrow_out(LweSample* out, const Bits& a, const Bits& b) {
   requireCloud();
   if (a.width != b.width) throw std::runtime_error("cmp width mismatch");
-  LweSample* bin = new_gate_bootstrapping_ciphertext(g_params);
-  LweSample* bout = new_gate_bootstrapping_ciphertext(g_params);
-  LweSample* diff = new_gate_bootstrapping_ciphertext(g_params);
-  bootsCONSTANT(bin, 0, g_cloud); linear();
-  for (int i = 0; i < a.width; i++) {
-    full_subtractor(diff, bout, &a.s[i], &b.s[i], bin);
-    copy_bit(bin, bout);
+  Bits state(3);
+  LweSample *borrow = &state.s[0], *next = &state.s[1], *different = &state.s[2];
+  bootsANDNY(borrow, &a.s[0], &b.s[0], g_cloud); gate();
+  for (int i = 1; i < a.width; ++i) {
+    bootsXOR(different, &a.s[i], &b.s[i], g_cloud); gate();
+    bootsMUX(next, different, &b.s[i], borrow, g_cloud); gate();
+    std::swap(borrow, next);
   }
-  bootsCOPY(out, bin, g_cloud); linear();
-  delete_gate_bootstrapping_ciphertext(bin);
-  delete_gate_bootstrapping_ciphertext(bout);
-  delete_gate_bootstrapping_ciphertext(diff);
+  bootsCOPY(out, borrow, g_cloud); linear();
+}
+
+// Public threshold comparison with one bootstrap per *relevant* bit.
+// For public c_i, borrow_out = !a_i OR borrow_in when c_i=1, else
+// !a_i AND borrow_in. Below the first set bit there can be no borrow;
+// that first bit is a noiseless NOT. Never branch on encrypted values.
+void ge_const(LweSample* out, const Bits& a, unsigned long long c) {
+  if (bit_length(c) > a.width) throw std::runtime_error("threshold exceeds ciphertext width");
+  if (c == 0) {
+    bootsCONSTANT(out, 1, g_cloud); linear();
+    return;
+  }
+  int i = 0;
+  while (((c >> i) & 1ULL) == 0) ++i;
+  Bits state(2);
+  LweSample *borrow = &state.s[0], *next = &state.s[1];
+  bootsNOT(borrow, &a.s[i], g_cloud); linear();
+  for (++i; i < a.width; ++i) {
+    if (i < 64 && ((c >> i) & 1ULL)) bootsORNY(next, &a.s[i], borrow, g_cloud);
+    else bootsANDNY(next, &a.s[i], borrow, g_cloud);
+    gate();
+    std::swap(borrow, next);
+  }
+  bootsNOT(out, borrow, g_cloud); linear();
 }
 
 void mul_const(Bits& out, const Bits& a, unsigned long long c) {
@@ -349,6 +387,20 @@ void div_const(Bits& q, const Bits& a, unsigned long long d) {
   requireCloud();
   if (d == 0) throw std::runtime_error("division by zero");
   if (q.width > a.width) throw std::runtime_error("quotient wider than numerator");
+  if (bit_length(d) > a.width) {
+    constant(q, 0);
+    return;
+  }
+  // Power-of-two division is only a shift; elide the restoring circuit.
+  if ((d & (d - 1)) == 0) {
+    const int shift = bit_length(d) - 1;
+    for (int i = 0; i < q.width; i++) {
+      if (i + shift < a.width) bootsCOPY(&q.s[i], &a.s[i + shift], g_cloud);
+      else bootsCONSTANT(&q.s[i], 0, g_cloud);
+      linear();
+    }
+    return;
+  }
   int rw = bit_length(d) + 1;
   if (rw > a.width) rw = a.width;
   Bits rem(rw), divisor(rw), diff(rw);
@@ -397,42 +449,107 @@ std::string param_string() {
   return os.str();
 }
 
+// Validate framing and arity BEFORE mutating key state or writing a response.
+size_t arity(const std::string& op) {
+  if (op == "PING" || op == "MODE" || op == "STATS" || op == "QUIT") return 0;
+  if (op == "LOADCLOUD") return 1;
+  if (op == "KEYGEN" || op == "ENC" || op == "DEC" || op == "CONST" || op == "NOT") return 2;
+  if (op == "ADD" || op == "SUB" || op == "AND" || op == "OR" || op == "XOR" ||
+      op == "ADDCONST" || op == "SHR" || op == "RESIZE" || op == "GE_CONST") return 3;
+  if (op == "MULCONST" || op == "CMP" || op == "MUX" || op == "DIVCONST") return 4;
+  if (op == "MUL" || op == "DIV") return 5;
+  throw std::runtime_error("unknown op");
+}
+
+void unload_keys() {
+  if (g_secret) {
+    delete_gate_bootstrapping_secret_keyset(g_secret);
+    delete_gate_bootstrapping_parameters(g_params);
+  } else if (g_owner_cloud && g_cloud) {
+    delete_gate_bootstrapping_cloud_keyset(g_cloud);
+  } else if (g_params) {
+    delete_gate_bootstrapping_parameters(g_params);
+  }
+  g_params = nullptr;
+  g_secret = nullptr;
+  g_cloud = nullptr;
+  g_owner_cloud = false;
+}
+
+void keygen(int security, const std::string& path) {
+  const int fd = open(path.c_str(), O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC | O_NOFOLLOW, 0600);
+  if (fd < 0) throw std::runtime_error("cannot create new cloud key file");
+  FILE* file = fdopen(fd, "wb");
+  if (!file) {
+    close(fd);
+    unlink(path.c_str());
+    throw std::runtime_error("cannot open cloud key stream");
+  }
+  std::unique_ptr<FILE, decltype(&fclose)> output(file, fclose);
+  try {
+    g_params = new_default_gate_bootstrapping_parameters(security);
+    g_secret = new_random_gate_bootstrapping_secret_keyset(g_params);
+    g_cloud = const_cast<TFheGateBootstrappingCloudKeySet*>(&g_secret->cloud);
+    export_tfheGateBootstrappingCloudKeySet_toFile(output.get(), g_cloud);
+    if (fflush(output.get()) != 0 || ferror(output.get()) || fclose(output.release()) != 0) {
+      throw std::runtime_error("cannot finish writing cloud key");
+    }
+  } catch (...) {
+    unload_keys();
+    unlink(path.c_str());
+    throw;
+  }
+}
+
 }  // namespace
 
-int main(int argc, char** argv) {
+int main() {
   std::ios::sync_with_stdio(false);
-  std::string line;
-  while (std::getline(std::cin, line)) {
-    if (line.empty()) continue;
-    std::istringstream in(line);
+  // Cap allocation before reading a delimiter, not after an unbounded getline.
+  constexpr size_t max_frame = 2 * 1024 * 1024;
+  std::vector<char> buffer(max_frame + 1);
+  while (std::cin.getline(buffer.data(), buffer.size())) {
+    if (std::cin.eof()) return 2;  // An unterminated frame is never dispatched.
+    const auto size = static_cast<size_t>(std::cin.gcount() - 1);
+    if (size == 0) continue;
+    const std::string line(buffer.data(), size);
+    if (line.find('\0') != std::string::npos) return 2;
+    std::istringstream frame(line);
     std::string id, op;
-    in >> id >> op;
+    frame >> id >> op;
     try {
+      parse_ull(id);
+    } catch (const std::exception&) {
+      return 2;  // Cannot correlate a response to this frame.
+    }
+    try {
+      const size_t argc = arity(op);
+      const auto start = frame.tellg();
+      std::string arg;
+      size_t seen = 0;
+      while (frame >> arg) {
+        if (++seen > argc) throw std::runtime_error("unexpected arguments");
+      }
+      if (seen != argc) throw std::runtime_error("missing arguments");
+      std::istringstream in;
+      if (argc) in.str(line.substr(static_cast<size_t>(start)));
       if (op == "PING") {
         std::cout << id << " OK PONG\n";
       } else if (op == "KEYGEN") {
         std::string secs, path;
         in >> secs >> path;
-        int security = static_cast<int>(parse_ull(secs));
-        if (security != 80 && security != 128)
-          throw std::runtime_error("security must be 80 or 128");
+        const auto security = parse_ull(secs);
+        if (security != 128) throw std::runtime_error("only the upstream 128 parameter preset is supported");
         if (g_secret || g_cloud) throw std::runtime_error("key already loaded");
-        g_params = new_default_gate_bootstrapping_parameters(security);
-        g_secret = new_random_gate_bootstrapping_secret_keyset(g_params);
-        g_cloud = const_cast<TFheGateBootstrappingCloudKeySet*>(&g_secret->cloud);
-        FILE* f = fopen(path.c_str(), "wb");
-        if (!f) throw std::runtime_error("cannot write cloud key");
-        export_tfheGateBootstrappingCloudKeySet_toFile(f, g_cloud);
-        fclose(f);
+        keygen(static_cast<int>(security), path);
         std::cout << id << " OK client " << security << " " << param_string() << "\n";
       } else if (op == "LOADCLOUD") {
         std::string path;
         in >> path;
         if (g_secret || g_cloud) throw std::runtime_error("key already loaded");
-        FILE* f = fopen(path.c_str(), "rb");
-        if (!f) throw std::runtime_error("cannot read cloud key");
-        g_cloud = new_tfheGateBootstrappingCloudKeySet_fromFile(f);
-        fclose(f);
+        std::unique_ptr<FILE, decltype(&fclose)> key(fopen(path.c_str(), "rb"), fclose);
+        if (!key) throw std::runtime_error("cannot read cloud key");
+        g_cloud = new_tfheGateBootstrappingCloudKeySet_fromFile(key.get());
         g_owner_cloud = true;
         g_params = const_cast<TFheGateBootstrappingParameterSet*>(g_cloud->params);
         std::cout << id << " OK evaluator " << param_string() << "\n";
@@ -470,6 +587,7 @@ int main(int argc, char** argv) {
         in >> ws >> value;
         int w = parse_width(ws);
         unsigned long long v = parse_ull(value);
+        if (bit_length(v) > w) throw std::runtime_error("constant exceeds bit width");
         Bits b(w);
         constant(b, v);
         std::cout << id << " OK " << w << " " << serialize(b) << "\n";
@@ -558,6 +676,15 @@ int main(int argc, char** argv) {
           else { bootsCONSTANT(&out.s[i], 0, g_cloud); linear(); }
         }
         std::cout << id << " OK " << ow << " " << serialize(out) << "\n";
+      } else if (op == "GE_CONST") {
+        std::string ws, ba, cv;
+        in >> ws >> ba >> cv;
+        int w = parse_width(ws);
+        auto threshold = parse_ull(cv);
+        Bits a(w), out(1);
+        deserialize(a, ba);
+        ge_const(&out.s[0], a, threshold);
+        std::cout << id << " OK 1 " << serialize(out) << "\n";
       } else if (op == "CMP") {
         std::string cmpop, ws, ba, bb;
         in >> cmpop >> ws >> ba >> bb;
@@ -630,14 +757,12 @@ int main(int argc, char** argv) {
       } else {
         throw std::runtime_error("unknown op");
       }
-      std::string extra;
-      if (in >> extra) throw std::runtime_error("trailing arguments");
     } catch (const std::exception& e) {
       std::cout << id << " ERR " << e.what() << "\n";
     }
     std::cout.flush();
   }
-  if (g_secret) delete_gate_bootstrapping_secret_keyset(g_secret);
-  else if (g_owner_cloud && g_cloud) delete_gate_bootstrapping_cloud_keyset(g_cloud);
-  return 0;
+  const bool bad_frame = std::cin.fail() && !std::cin.eof();
+  unload_keys();
+  return bad_frame ? 2 : 0;
 }

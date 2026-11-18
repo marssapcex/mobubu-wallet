@@ -1,11 +1,9 @@
 /**
  * Backend-agnostic FHE/HE types.
  *
- * The swap protocol only depends on this interface. The default backend is
- * Microsoft SEAL BFV via `node-seal` (leveled homomorphic encryption). A true
- * TFHE backend (Zama tfhe-rs / fhEVM) can be substituted behind this interface,
- * but production integration may also require changes to integer encoding,
- * range checks, key management and threshold opening. See README "FHE backend".
+ * The local encrypted quote demo uses Microsoft SEAL BFV via `node-seal`.
+ * These vector operations are not settlement authorization, and do not accept
+ * untrusted remote ciphertexts. CGGI uses a separate integer interface.
  */
 
 /** Serialized (base64) public material the matcher/relayer is allowed to hold. */
@@ -54,8 +52,6 @@ export interface FheClient {
   encrypt(values: readonly bigint[]): EncryptedVector;
   /** Decrypt a vector. Only the secret-key holder can do this. */
   decrypt(ct: EncryptedVector): bigint[];
-  /** Serialize the secret key (keep offline / in a hardened key store). */
-  exportSecretKey(): string;
 }
 
 /**

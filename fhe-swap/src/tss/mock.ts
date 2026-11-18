@@ -4,7 +4,7 @@ import {
   sign as cryptoSign,
   verify as cryptoVerify,
 } from "node:crypto";
-import type { Asset, Chain } from "../assets.js";
+import { chainOf, type Asset, type Chain } from "../assets.js";
 import type { ThresholdSigner } from "../chains/types.js";
 import {
   suiteForAsset,
@@ -20,7 +20,7 @@ import {
  *
  * Uses real ed25519 signatures as *authorization approvals* so tests can verify
  * threshold membership. This is NOT a FROST partial signature and must not be
- * described as one. Production FROST/FROSTLASS would replace this member.
+ * described as one. A real chain-specific signer would replace this mock.
  */
 export class MockTssMember implements TssMember {
   readonly id: string;
@@ -98,6 +98,7 @@ export class MockTssCluster implements ThresholdSigner, TssSigner {
     if (!req.vaultConfirmed) {
       throw new Error("vault inbound must be confirmed before TSS signing");
     }
+    if (chainOf(req.asset) !== req.chain) throw new Error("mock signing chain/asset mismatch");
     const expectedSuite = suiteForAsset(req.asset);
     if (req.suite !== expectedSuite) {
       throw new Error(`asset ${req.asset} requires suite ${expectedSuite}`);
@@ -120,8 +121,7 @@ export class MockTssCluster implements ThresholdSigner, TssSigner {
       throw new Error("not enough TSS approvals");
     }
 
-    // Mock aggregation: production FROST/FROSTLASS would aggregate partials into
-    // a single valid chain signature. Here we just bind the approval set.
+    // Pack local approvals, not a signature accepted by the destination chain.
     const approvalBlob = Buffer.from(JSON.stringify(approvals)).toString("base64");
     const rawTx = `tss:${req.suite}:${req.chain}:${req.asset}:${approvalBlob}:${req.unsignedTx}`;
     const txHash = createHash("sha256").update(rawTx).digest("hex");

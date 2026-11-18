@@ -1,0 +1,27 @@
+--- a/src/include/numeric_functions.h
++++ b/src/include/numeric_functions.h
+@@ -9,6 +9,7 @@
+ #ifdef __cplusplus
+ #include <random>
+-extern std::default_random_engine generator;
++#include "os_random.h"
++extern MobubuOsRandom generator;
+ extern std::uniform_int_distribution<Torus32> uniformTorus32_distrib;
+ static const int64_t _two31 = INT64_C(1) << 31; // 2^31
+ static const int64_t _two32 = INT64_C(1) << 32; // 2^32
+--- a/src/libtfhe/numeric-functions.cpp
++++ b/src/libtfhe/numeric-functions.cpp
+@@ -11,3 +11,3 @@
+-default_random_engine generator;
++MobubuOsRandom generator;
+ uniform_int_distribution<Torus32> uniformTorus32_distrib(INT32_MIN, INT32_MAX);
+ uniform_int_distribution<int32_t> uniformInt_distrib(INT_MIN, INT_MAX);
+@@ -15,5 +15,4 @@
+-/** sets the seed of the random number generator to the given values */
+-EXPORT void tfhe_random_generator_setSeed(uint32_t* values, int32_t size) {
+-    seed_seq seeds(values, values+size);
+-    generator.seed(seeds);
++// Retain the symbol for the pinned library ABI but refuse deterministic seeding.
++EXPORT void tfhe_random_generator_setSeed(uint32_t*, int32_t) {
++    throw std::runtime_error("deterministic TFHE seeding is disabled");
+ }

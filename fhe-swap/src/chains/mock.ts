@@ -1,10 +1,6 @@
 import { createHash } from "node:crypto";
-import type { Asset, Chain } from "../assets.js";
-import type {
-  InboundObservation,
-  OutboundInstruction,
-} from "../core/types.js";
-import type { ChainAdapter } from "./types.js";
+import { chainOf, type Asset, type Chain } from "../assets.js";
+import type { ChainAdapter, InboundObservation, OutboundInstruction } from "./types.js";
 
 export interface MockVault {
   address: string;
@@ -30,15 +26,16 @@ export class MockChainAdapter implements ChainAdapter {
     vaults: Partial<Record<Asset, MockVault>>;
   }) {
     this.chain = opts.chain;
-    this.assets = opts.assets;
-    for (const asset of opts.assets) {
+    this.assets = Object.freeze([...opts.assets]);
+    for (const asset of this.assets) {
+      if (chainOf(asset) !== this.chain || this.vaults.has(asset)) throw new Error(`invalid asset ${asset} for mock ${this.chain}`);
       const vault = opts.vaults[asset];
       if (!vault) throw new Error(`missing mock vault for ${asset}`);
-      this.vaults.set(asset, vault);
+      this.vaults.set(asset, { ...vault });
     }
   }
 
-  vaultAddress(asset: Asset): string {
+  private vaultAddress(asset: Asset): string {
     const vault = this.vaults.get(asset);
     if (!vault) throw new Error(`asset ${asset} not on ${this.chain}`);
     return vault.address;
@@ -48,6 +45,11 @@ export class MockChainAdapter implements ChainAdapter {
     const vault = this.vaults.get(asset);
     if (!vault) throw new Error(`asset ${asset} not on ${this.chain}`);
     return vault.confirmations;
+  }
+
+  requiredOutboundConfirmations(asset: Asset): number {
+    this.requiredConfirmations(asset); // Reject unsupported assets.
+    return 1;
   }
 
   queueInbound(obs: InboundObservation): void {
@@ -62,7 +64,7 @@ export class MockChainAdapter implements ChainAdapter {
     if (!Number.isInteger(obs.confirmations) || obs.confirmations < 0) {
       throw new Error("inbound confirmations invalid");
     }
-    this.inbound.set(obs.intentId, obs);
+    this.inbound.set(obs.depositTag, { ...obs });
     this.confirmations.set(obs.txHash, obs.confirmations);
   }
 
@@ -71,13 +73,13 @@ export class MockChainAdapter implements ChainAdapter {
   }
 
   async scanInbound(
-    intentId: string,
+    depositTag: string,
     asset: Asset,
   ): Promise<InboundObservation | null> {
-    const obs = this.inbound.get(intentId) ?? null;
+    const obs = this.inbound.get(depositTag) ?? null;
     if (!obs) return null;
-    if (!this.assets.includes(asset)) return null;
-    return obs;
+    if (obs.asset !== asset || !this.assets.includes(asset)) return null;
+    return { ...obs };
   }
 
   async getConfirmations(txHash: string): Promise<number> {
@@ -85,6 +87,7 @@ export class MockChainAdapter implements ChainAdapter {
   }
 
   async buildOutbound(instruction: OutboundInstruction): Promise<string> {
+    if (instruction.chain !== this.chain) throw new Error("mock outbound chain mismatch");
     return JSON.stringify({
       chain: this.chain,
       asset: instruction.asset,
@@ -92,14 +95,14 @@ export class MockChainAdapter implements ChainAdapter {
       to: instruction.to,
       amountBaseUnits: instruction.amountBaseUnits.toString(),
       memoHash: instruction.memoHash ?? null,
-      intentId: instruction.intentId,
+      orderId: instruction.orderId,
     });
   }
 
   async broadcast(rawTx: string): Promise<string> {
     const txHash = createHash("sha256").update(rawTx).digest("hex");
     this.mempool.set(txHash, rawTx);
-    this.confirmations.set(txHash, 1);
+    if (!this.confirmations.has(txHash)) this.confirmations.set(txHash, 1);
     return txHash;
   }
 

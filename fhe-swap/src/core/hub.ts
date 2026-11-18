@@ -22,8 +22,10 @@ export interface HubPoolConfig {
   reserveNyxThor: bigint;
   /** Public reference price: NYX per 1 external asset, scaled by PRICE_SCALE. */
   referencePriceNyxPerAssetScaled: bigint;
-  /** Safety cap for one subswap input, in thor units of the input side. */
+  /** Cap for an external-asset input, in that asset's thor units. */
   maxInputThor: bigint;
+  /** Cap for NYX input, in NYX thor units. Defaults to maxInputThor. */
+  maxNyxInputThor?: bigint;
 }
 
 export interface HubSwapQuote {
@@ -53,6 +55,7 @@ export class HubPool {
   readonly asset: Asset;
   readonly referencePriceNyxPerAssetScaled: bigint;
   readonly maxInputThor: bigint;
+  readonly maxNyxInputThor: bigint;
 
   private reserveAssetThor: bigint;
   private reserveNyxThor: bigint;
@@ -65,13 +68,15 @@ export class HubPool {
     if (cfg.referencePriceNyxPerAssetScaled <= 0n) {
       throw new Error("reference price must be positive");
     }
-    if (cfg.maxInputThor <= 0n) {
-      throw new Error("maxInputThor must be positive");
+    const maxNyxInputThor = cfg.maxNyxInputThor ?? cfg.maxInputThor;
+    if (cfg.maxInputThor <= 0n || maxNyxInputThor <= 0n) {
+      throw new Error("pool input caps must be positive");
     }
     this.reserveAssetThor = cfg.reserveAssetThor;
     this.reserveNyxThor = cfg.reserveNyxThor;
     this.referencePriceNyxPerAssetScaled = cfg.referencePriceNyxPerAssetScaled;
     this.maxInputThor = cfg.maxInputThor;
+    this.maxNyxInputThor = maxNyxInputThor;
   }
 
   reserves(): { assetThor: bigint; nyxThor: bigint } {
@@ -81,7 +86,7 @@ export class HubPool {
     };
   }
 
-  /** Snapshot reserves so a failed stream can be rolled back atomically. */
+  /** Snapshot for simulation; not a rollback of already committed streams. */
   snapshot(): { assetThor: bigint; nyxThor: bigint } {
     return this.reserves();
   }
@@ -99,15 +104,13 @@ export class HubPool {
     return (this.reserveNyxThor * PRICE_SCALE) / this.reserveAssetThor;
   }
 
-  private assertInput(amountInThor: bigint): void {
+  private assertInput(amountInThor: bigint, maxInputThor: bigint): void {
     if (amountInThor <= 0n) throw new Error("amount must be positive");
-    if (amountInThor > this.maxInputThor) {
-      throw new Error(`amount exceeds hub pool maxInputThor for ${this.asset}`);
-    }
+    if (amountInThor > maxInputThor) throw new Error(`amount exceeds input cap for ${this.asset} pool`);
   }
 
   quoteAssetToNyx(amountAssetThor: bigint): HubSwapQuote {
-    this.assertInput(amountAssetThor);
+    this.assertInput(amountAssetThor, this.maxInputThor);
     const out =
       (this.reserveNyxThor * amountAssetThor) /
       (this.reserveAssetThor + amountAssetThor);
@@ -115,7 +118,7 @@ export class HubPool {
   }
 
   quoteNyxToAsset(amountNyxThor: bigint): HubSwapQuote {
-    this.assertInput(amountNyxThor);
+    this.assertInput(amountNyxThor, this.maxNyxInputThor);
     const out =
       (this.reserveAssetThor * amountNyxThor) /
       (this.reserveNyxThor + amountNyxThor);
@@ -168,35 +171,30 @@ export class HubPool {
     }
 
     const k = this.reserveAssetThor * this.reserveNyxThor;
-    const targetAsset = isqrt((k * PRICE_SCALE) / ref);
-    if (targetAsset <= 0n) return null;
-    const targetNyx = k / targetAsset;
-    if (targetAsset <= 0n || targetNyx <= 0n) return null;
+    const buyAsset = before < ref;
+    const [reserveIn, cap, reserveOut] = buyAsset
+      ? [this.reserveNyxThor, this.maxNyxInputThor, this.reserveAssetThor]
+      : [this.reserveAssetThor, this.maxInputThor, this.reserveNyxThor];
+    const targetIn = isqrt(buyAsset ? (k * ref) / PRICE_SCALE : (k * PRICE_SCALE) / ref);
+    const delta = targetIn - reserveIn;
+    if (delta <= 0n) return null;
+    const inputThor = delta > cap ? cap : delta;
+    // The continuous target only proposes the input. Apply the pool's discrete
+    // AMM quote, never overwrite with independently rounded target reserves.
+    const { amountOutThor: outputThor } = buyAsset
+      ? this.quoteNyxToAsset(inputThor) : this.quoteAssetToNyx(inputThor);
+    if (outputThor <= 0n) return null;
+    const priceAfter = buyAsset
+      ? ((reserveIn + inputThor) * PRICE_SCALE) / (reserveOut - outputThor)
+      : ((reserveOut - outputThor) * PRICE_SCALE) / (reserveIn + inputThor);
+    const afterDiff = priceAfter > ref ? priceAfter - ref : ref - priceAfter;
+    if (afterDiff >= diff) return null; // Discrete rounding can overshoot on small pools.
 
-    let direction: ArbAction["direction"];
-    let inputThor: bigint;
-    let outputThor: bigint;
-
-    if (before < ref) {
-      // Asset is cheap in NYX terms: arb sells NYX into pool, buys asset out.
-      direction = "nyx-in-asset-out";
-      inputThor = targetNyx - this.reserveNyxThor;
-      outputThor = this.reserveAssetThor - targetAsset;
-    } else {
-      // Asset is rich in NYX terms: arb sells asset into pool, buys NYX out.
-      direction = "asset-in-nyx-out";
-      inputThor = targetAsset - this.reserveAssetThor;
-      outputThor = this.reserveNyxThor - targetNyx;
-    }
-
-    if (inputThor <= 0n || outputThor <= 0n) return null;
-
-    this.reserveAssetThor = targetAsset;
-    this.reserveNyxThor = targetNyx;
-
+    if (buyAsset) this.executeNyxToAsset(inputThor);
+    else this.executeAssetToNyx(inputThor);
     return {
       asset: this.asset,
-      direction,
+      direction: buyAsset ? "nyx-in-asset-out" : "asset-in-nyx-out",
       inputThor,
       outputThor,
       beforePriceScaled: before,

@@ -21,9 +21,7 @@ Pinned links:
 - FROST: https://github.com/serai-dex/serai/blob/4b89cf0206184886e96d0663861596312e5b47d2/crypto/frost/src/lib.rs
 - DLEq cross-group: https://github.com/serai-dex/serai/blob/4b89cf0206184886e96d0663861596312e5b47d2/crypto/dleq/src/cross_group/mod.rs
 - Processor multisigs: https://github.com/serai-dex/serai/blob/4b89cf0206184886e96d0663861596312e5b47d2/processor/src/multisigs/mod.rs
-- Monero processor: https://github.com/serai-dex/serai/blob/4b89cf0206184886e96d0663861596312e5b47d2/processor/src/networks/monero.rs
 - Bitcoin RPC: https://github.com/serai-dex/serai/blob/4b89cf0206184886e96d0663861596312e5b47d2/networks/bitcoin/src/rpc.rs
-- Ethereum ERC-20: https://github.com/serai-dex/serai/blob/4b89cf0206184886e96d0663861596312e5b47d2/networks/ethereum/src/erc20.rs
 - DEX pallet: https://github.com/serai-dex/serai/blob/4b89cf0206184886e96d0663861596312e5b47d2/substrate/dex/pallet/src/lib.rs
 - In-instructions pallet: https://github.com/serai-dex/serai/blob/4b89cf0206184886e96d0663861596312e5b47d2/substrate/in-instructions/pallet/src/lib.rs
 
@@ -37,51 +35,6 @@ License notes from the inspected tree:
 - `processor`: AGPL-3.0-only.
 - `substrate/dex/pallet`: AGPL-3.0-only, with an Apache2 license file present.
 - `substrate/in-instructions/pallet`: AGPL-3.0-only.
-
-Serai’s README lists Bitcoin, Ethereum, DAI, and Monero. It does not provide
-Zcash support in the inspected tree.
-
-Note: the Monero library originally developed as `monero-serai` was transferred
-to the neutral `monero-oxide` organization. See:
-
-https://serai.exchange/2025/09/09/monero-serai-oxide.html
-
-## monero-oxide / FROSTLASS
-
-Canonical repository:
-
-https://github.com/monero-oxide/monero-oxide
-
-Inspected commit:
-
-```text
-a6b46701fb9b331006d7f2f2278bf51f123b1447
-```
-
-Pinned links:
-
-- Root: https://github.com/monero-oxide/monero-oxide/tree/a6b46701fb9b331006d7f2f2278bf51f123b1447
-- FROSTLASS audit README: https://github.com/monero-oxide/monero-oxide/blob/a6b46701fb9b331006d7f2f2278bf51f123b1447/audits/FROSTLASS/README.md
-- FROSTLASS PDF: https://github.com/monero-oxide/monero-oxide/blob/a6b46701fb9b331006d7f2f2278bf51f123b1447/audits/FROSTLASS/FROSTLASS.pdf
-- CLSAG crate: https://github.com/monero-oxide/monero-oxide/tree/a6b46701fb9b331006d7f2f2278bf51f123b1447/monero-oxide/ringct/clsag
-- CLSAG multisig: https://github.com/monero-oxide/monero-oxide/blob/a6b46701fb9b331006d7f2f2278bf51f123b1447/monero-oxide/ringct/clsag/src/multisig.rs
-- Wallet multisig send: https://github.com/monero-oxide/monero-oxide/blob/a6b46701fb9b331006d7f2f2278bf51f123b1447/monero-oxide/wallet/src/send/multisig.rs
-
-FROSTLASS paper:
-
-https://eprint.iacr.org/2026/589.pdf
-
-Verified details used by this project:
-
-- FROSTLASS thresholdizes Monero CLSAG, not a naive LSAG “thring”.
-- The paper uses a “Schnorr-shaped hole” proof technique and one-more
-  discrete-logarithm assumptions.
-- Definition 2 in the paper is the κ-OMDL assumption.
-- The Rust implementation is in `monero-oxide/ringct/clsag/src/multisig.rs`.
-- The inspected `monero-clsag` crate license is MIT.
-
-This project does not vendor monero-oxide code. It only defines a signer
-boundary and uses a mock threshold cluster for local tests.
 
 ## THORChain
 
@@ -174,7 +127,7 @@ or:
 bash scripts/fetch-upstreams.sh /path/to/upstreams
 ```
 
-The script fetches Serai and monero-oxide from GitHub. It prefers canonical
+The script fetches Serai from GitHub. It prefers canonical
 THORChain GitLab. If GitLab is blocked, it explicitly warns that the GitHub
 mirror is deprecated/README-only and that `faddat/thornode` is a third-party
 fork.

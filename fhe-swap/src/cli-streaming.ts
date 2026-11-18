@@ -1,6 +1,5 @@
 import { fromBaseUnits } from "./assets.js";
 import { MockChainAdapter } from "./chains/mock.js";
-import { OneTimeVaultBook } from "./chains/vault.js";
 import { CexPriceArbBot } from "./core/arb.js";
 import { HubPool, HubPoolBook, HubRouter } from "./core/hub.js";
 import { PrivateOrderFlow } from "./core/orderflow.js";
@@ -15,13 +14,7 @@ import {
 } from "./privacy/threshold.js";
 import { MockTssCluster } from "./tss/mock.js";
 
-async function main(): Promise<void> {
-  console.log("NYX hub streaming demo — native BTC/ETH/XMR/ZEC/DAI, no wrapped assets");
-  console.log("Route: BTC -> NYX -> ETH, sealed orderflow, threshold opening, arb between subswaps");
-
-  let now = 1_000_000;
-  const nowFn = () => now;
-
+function makePools() {
   const pools = new HubPoolBook();
   pools.add(
     new HubPool({
@@ -30,6 +23,7 @@ async function main(): Promise<void> {
       reserveNyxThor: 100_000_000_000_000_000n,
       referencePriceNyxPerAssetScaled: 1_000_000n * PRICE_SCALE,
       maxInputThor: 10_000_000_000n,
+      maxNyxInputThor: 10_000_000_000_000_000n,
     }),
   );
   pools.add(
@@ -41,6 +35,17 @@ async function main(): Promise<void> {
       maxInputThor: 10_000_000_000_000_000n,
     }),
   );
+  return pools;
+}
+
+async function main(): Promise<void> {
+  console.log("NYX hub streaming simulation — mock chains, no real funds");
+  console.log("Route: BTC -> NYX -> ETH, sealed orderflow, threshold opening, arb between subswaps");
+
+  let now = 1_000_000;
+  const nowFn = () => now;
+
+  const pools = makePools();
 
   const bitcoin = new MockChainAdapter({
     chain: "bitcoin",
@@ -49,11 +54,8 @@ async function main(): Promise<void> {
   });
   const ethereum = new MockChainAdapter({
     chain: "ethereum",
-    assets: ["ETH", "DAI"],
-    vaults: {
-      ETH: { address: "eth-vault-fresh", confirmations: 12 },
-      DAI: { address: "dai-vault-fresh", confirmations: 12 },
-    },
+    assets: ["ETH"],
+    vaults: { ETH: { address: "eth-vault-fresh", confirmations: 12 } },
   });
 
   const orderFlow = new PrivateOrderFlow();
@@ -61,7 +63,6 @@ async function main(): Promise<void> {
   const opener = new ThresholdOrderOpener(committee);
   const treasury = new TokenTreasury();
   const signer = MockTssCluster.create(5, 3, "ecdsa-secp256k1");
-  const vaultBook = new OneTimeVaultBook(nowFn);
   const cexFeed = new StaticCexPriceFeed("binance-mid-static", {
     BTC: 1_000_000n * PRICE_SCALE,
     ETH: 50_000n * PRICE_SCALE,
@@ -103,11 +104,9 @@ async function main(): Promise<void> {
   for (const share of shares.slice(0, 3)) engine.submitShare(orderId, share);
 
   const depositTag = engine.depositTag(orderId);
-  const oneTime = vaultBook.allocate(orderId, depositTag, "bitcoin", "BTC");
-  console.log("L1 deposit tag (not order id):", depositTag);
-  console.log("one-time BTC vault address:", oneTime.address);
+  console.log("Mock inbound deposit tag:", depositTag);
   bitcoin.queueInbound({
-    intentId: depositTag,
+    depositTag,
     chain: "bitcoin",
     asset: "BTC",
     txHash: "mock-btc-inbound",
@@ -122,25 +121,7 @@ async function main(): Promise<void> {
     },
   });
 
-  const oneShotPools = new HubPoolBook();
-  oneShotPools.add(
-    new HubPool({
-      asset: "BTC",
-      reserveAssetThor: 100_000_000_000n,
-      reserveNyxThor: 100_000_000_000_000_000n,
-      referencePriceNyxPerAssetScaled: 1_000_000n * PRICE_SCALE,
-      maxInputThor: 10_000_000_000n,
-    }),
-  );
-  oneShotPools.add(
-    new HubPool({
-      asset: "ETH",
-      reserveAssetThor: 1_000_000_000_000n,
-      reserveNyxThor: 50_000_000_000_000_000n,
-      referencePriceNyxPerAssetScaled: 50_000n * PRICE_SCALE,
-      maxInputThor: 10_000_000_000_000_000n,
-    }),
-  );
+  const oneShotPools = makePools();
   const oneShot = new HubRouter(oneShotPools, 30).quote("BTC", "ETH", 1_000_000_000n);
 
   console.log("state:", completed.state);

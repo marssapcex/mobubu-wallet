@@ -41,7 +41,7 @@ export function intentId(
   payloadCiphertext: string,
 ): string {
   const canon = JSON.stringify({
-    pair: header.pair,
+    pair: { from: header.pair.from, to: header.pair.to },
     destination: header.destination,
     refundAddress: header.refundAddress,
     deadline: header.deadline,
@@ -49,6 +49,14 @@ export function intentId(
     payload: payloadCiphertext,
   });
   return createHash("sha256").update(canon).digest("hex").slice(0, 32);
+}
+
+/** Internal consistency check, not authentication of a price or an order. */
+export function assertIntentId(intent: EncryptedSwapIntent): void {
+  makePair(intent.header.pair.from, intent.header.pair.to);
+  if (intent.header.id !== intentId(intent.header, intent.payload.values.ciphertext)) {
+    throw new Error("intent id does not bind header to encrypted payload");
+  }
 }
 
 export function createEncryptedIntent(
@@ -75,7 +83,7 @@ export function createEncryptedIntent(
     throw new Error("minOut exceeds FHE plaintext modulus");
   }
 
-  // Salt prevents dictionary attacks on low-entropy amounts.
+  // Keep a randomized layout marker for the client-side consistency check.
   const salt =
     randomBytes(16).reduce((acc, b) => (acc << 8n) | BigInt(b), 0n) %
     client.plainModulus;
@@ -106,6 +114,7 @@ export function decryptIntentAmounts(
   client: FheClient,
   intent: EncryptedSwapIntent,
 ): { amountThor: bigint; minOutThor: bigint; salt: bigint } {
+  assertIntentId(intent);
   if (intent.payload.layout !== "amount2_minout_salt_v1") {
     throw new Error("unknown payload layout");
   }

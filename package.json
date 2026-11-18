@@ -1,10 +1,20 @@
 {
   "name": "mobubu-wallet",
   "version": "1.0.0",
-  "description": "",
-  "main": "index.js",
+  "description": "Native BTC, ETH and BNB swap settlement with SLH-DSA and encrypted TFHE quotes",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "build:contracts": "node scripts/compile-contracts.mjs",
+    "test": "node --test \"test/*.test.mjs\"",
+    "test:vault": "node --test test/pq-vault.test.mjs",
+    "networks": "node scripts/native-networks.mjs",
+    "oracle:read": "node scripts/read-oracle.mjs",
+    "test:oracle": "node --test test/oracle.test.mjs",
+    "test:fhe": "npm --prefix fhe-swap test",
+    "test:lazer": "bash labs/lazer-spend/build.sh && python3 labs/lazer-spend/test_spend.py && node labs/lazer-spend/evm-bound.mjs",
+    "verify:all": "npm run build:contracts && npm test && npm run test:fhe",
+    "audit:deps": "npm audit --audit-level=moderate && npm --prefix fhe-swap audit --audit-level=moderate",
+    "test:swap": "bash scripts/test-native-swap.sh",
+    "swap:ctl": "node scripts/swapctl.mjs"
   },
   "repository": {
     "type": "git",
@@ -18,9 +28,25 @@
   },
   "homepage": "https://github.com/marssapcex/mobubu-wallet#readme",
   "dependencies": {
-    "@nomicfoundation/hardhat-toolbox": "^7.0.0",
-    "ethers": "^6.17.0",
-    "hardhat": "^3.22.0"
+    "@noble/post-quantum": "0.7.1",
+    "bitcoinjs-lib": "7.0.5",
+    "ethers": "6.17.0",
+    "tiny-secp256k1": "2.2.5"
   },
-  "type": "module"
+  "type": "module",
+  "devDependencies": {
+    "@nomicfoundation/edr": "0.25.1",
+    "solc": "0.8.24"
+  },
+  "private": true,
+  "engines": {
+    "node": ">=22.13.0"
+  },
+  "overrides": {
+    "tmp": "0.2.7"
+  },
+  "exports": {
+    ".": "./packages/client/src/index.mjs",
+    "./swap": "./packages/swap/src/index.mjs"
+  }
 }

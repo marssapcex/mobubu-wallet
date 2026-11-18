@@ -25,7 +25,6 @@ clone_or_update() {
 }
 
 clone_or_update https://github.com/serai-dex/serai.git serai
-clone_or_update https://github.com/monero-oxide/monero-oxide.git monero-oxide
 
 if git ls-remote https://gitlab.com/thorchain/thornode.git HEAD >/dev/null 2>&1; then
   clone_or_update https://gitlab.com/thorchain/thornode.git thornode
@@ -41,7 +40,6 @@ cat <<'EOF'
 
 Reference links:
   Serai canonical:   https://github.com/serai-dex/serai
-  monero-oxide:      https://github.com/monero-oxide/monero-oxide
   THORChain canonical: https://gitlab.com/thorchain/thornode
   THORChain GitHub mirror (deprecated, README-only):
                      https://github.com/thorchain/thornode
@@ -50,7 +48,6 @@ Reference links:
 
 Licenses:
   Serai is mixed-license per crate (MIT / AGPL-3.0-only; some dual files).
-  monero-oxide / monero-clsag is MIT (inspect crate LICENSE before copying).
   THORChain thornode is MIT.
   This fhe-swap reference implementation is MIT and does not copy upstream code.
 EOF

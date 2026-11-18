@@ -1,4 +1,4 @@
-import { orderIdOf, type SealedOrder } from "../privacy/threshold.js";
+import { normalizeSealedOrder, orderIdOf, type SealedOrder } from "../privacy/threshold.js";
 
 /**
  * Private orderflow layer.
@@ -14,14 +14,16 @@ export class PrivateOrderFlow {
   private orders = new Map<string, SealedOrder>();
 
   submit(sealed: SealedOrder): string {
-    const id = orderIdOf(sealed);
+    const envelope = normalizeSealedOrder(sealed);
+    const id = orderIdOf(envelope);
     if (this.orders.has(id)) throw new Error("sealed order already exists");
-    this.orders.set(id, sealed);
+    this.orders.set(id, envelope);
     return id;
   }
 
   get(orderId: string): SealedOrder | undefined {
-    return this.orders.get(orderId);
+    const order = this.orders.get(orderId);
+    return order ? structuredClone(order) : undefined;
   }
 
   has(orderId: string): boolean {
@@ -29,7 +31,7 @@ export class PrivateOrderFlow {
   }
 
   listSealed(): SealedOrder[] {
-    return [...this.orders.values()];
+    return [...this.orders.values()].map((order) => structuredClone(order));
   }
 
   size(): number {

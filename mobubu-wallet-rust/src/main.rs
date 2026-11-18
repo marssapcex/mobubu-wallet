@@ -1,74 +1,68 @@
-mod chain;
-mod fhe;
-mod zk;
-mod vault;
-mod validator;
-mod network;
-mod types;
+use mobubu_wallet::zk::{
+    Proof, Statement, VerificationKey, KEY_BYTES, PROOF_BYTES, STATEMENT_BYTES,
+};
+use std::error::Error;
+use std::ffi::OsStr;
+use std::fs::{self, File, Metadata};
+use std::io::{self, Read};
+use std::process::ExitCode;
 
-use clap::Parser;
-use std::sync::Arc;
-use tokio::signal;
-
-#[derive(Parser, Debug)]
-#[command(author, version, about = "mobubu-wallet - Anonymous Cross-Chain Vault (FHE + ZK)", long_about = None)]
-struct Args {
-    /// Chain to run (btc, eth, xmr, zec, dai)
-    #[arg(short, long, default_value = "eth")]
-    chain: String,
-
-    /// Role: client, validator, or both
-    #[arg(short, long, default_value = "both")]
-    role: String,
-
-    /// Listen port for P2P
-    #[arg(long, default_value = "30333")]
-    port: u16,
-
-    /// Cloud key path for FHE evaluator
-    #[arg(long)]
-    cloud_key: Option<String>,
+fn validate_file<const N: usize>(metadata: Metadata) -> io::Result<()> {
+    if !metadata.is_file() || metadata.len() != N as u64 {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            format!("expected a regular file of exactly {N} bytes"),
+        ));
+    }
+    Ok(())
 }
 
-#[tokio::main]
-async fn main() -> anyhow::Result<()> {
-    tracing_subscriber::fmt::init();
-    let args = Args::parse();
-
-    println!("=== mobubu-wallet (Rust) ===");
-    println!("Chain: {}", args.chain);
-    println!("Role: {}", args.role);
-    println!("Port: {}", args.port);
-
-    let config = types::Config {
-        chain: args.chain.clone(),
-        role: args.role.clone(),
-        port: args.port,
-        cloud_key_path: args.cloud_key.clone(),
-    };
-
-    let state = Arc::new(types::AppState::new(config)?);
-
-    // Start P2P network
-    if args.role == "validator" || args.role == "both" {
-        let state_clone = state.clone();
-        tokio::spawn(async move {
-            if let Err(e) = network::run_p2p(state_clone).await {
-                tracing::error!(error = %e, "P2P network error");
-            }
-        });
+fn read_exact_file<const N: usize>(path: &OsStr) -> io::Result<[u8; N]> {
+    // Paths are local/trusted; check before open to avoid blocking on a FIFO.
+    validate_file::<N>(fs::metadata(path)?)?;
+    let mut file = File::open(path)?;
+    validate_file::<N>(file.metadata()?)?;
+    let mut bytes = [0; N];
+    file.read_exact(&mut bytes)?;
+    if file.read(&mut [0])? != 0 {
+        return Err(io::Error::new(io::ErrorKind::InvalidData, "trailing bytes"));
     }
+    Ok(bytes)
+}
 
-    // Start chain watcher (deposit/withdraw events)
-    let state_clone = state.clone();
-    tokio::spawn(async move {
-        if let Err(e) = chain::watch_chain(state_clone, &args.chain).await {
-            tracing::error!(error = %e, chain = %args.chain, "Chain watcher error");
+fn verify() -> Result<bool, Box<dyn Error>> {
+    let mut args = std::env::args_os().skip(1);
+    let (Some(cmd), Some(key), Some(proof), Some(expected), None) = (
+        args.next(),
+        args.next(),
+        args.next(),
+        args.next(),
+        args.next(),
+    ) else {
+        return Err("usage: mobubu-wallet verify <trusted-key.bin> <proof.bin> <expected-public-inputs.bin>".into());
+    };
+    if cmd != "verify" {
+        return Err("unsupported command; expected 'verify'".into());
+    }
+    let key = VerificationKey::decode(&read_exact_file::<KEY_BYTES>(&key)?)?;
+    let proof = Proof::decode(&read_exact_file::<PROOF_BYTES>(&proof)?)?;
+    let expected = Statement::decode(&read_exact_file::<STATEMENT_BYTES>(&expected)?)?;
+    Ok(key.verify(&proof, &expected))
+}
+
+fn main() -> ExitCode {
+    match verify() {
+        Ok(true) => {
+            println!("valid");
+            ExitCode::SUCCESS
         }
-    });
-
-    // Wait for shutdown signal
-    signal::ctrl_c().await?;
-    println!("Shutting down mobubu-wallet...");
-    Ok(())
+        Ok(false) => {
+            eprintln!("invalid proof for expected public inputs");
+            ExitCode::from(1)
+        }
+        Err(error) => {
+            eprintln!("verification error: {error}");
+            ExitCode::from(2)
+        }
+    }
 }

@@ -5,34 +5,24 @@ import type { Asset, Chain } from "../assets.js";
  *
  * - BTC: FROST over secp256k1 for Schnorr/taproot-style vault outputs
  *   (reference interface only). Legacy P2WPKH vaults would need ECDSA TSS.
- * - ETH/DAI: threshold ECDSA over secp256k1. FROST produces Schnorr signatures,
- *   which Ethereum does not verify natively; do not claim FROST signs ETH.
- * - XMR: FROSTLASS / threshold CLSAG, as formalized by Cypher Stack and
- *   implemented in monero-oxide.
- * - ZEC: experimental threshold spend-auth path; shielded Zcash production
- *   signing also requires Sapling/Orchard proof machinery.
+ * - ETH (Ethereum), BNB (BNB Smart Chain): threshold ECDSA over secp256k1 for
+ *   native EVM transactions. Same signing suite, separate chain/vault policy.
  *
- * This codebase does NOT implement audited FROST/FROSTLASS/ECDSA-TSS. It defines
+ * This codebase does NOT implement audited FROST/ECDSA-TSS. It defines
  * the orchestration boundary and a mock threshold cluster for local settlement
  * tests.
  */
 export type TssSuite =
   | "frost-secp256k1"
-  | "ecdsa-secp256k1"
-  | "frostlass-clsag"
-  | "frost-ed25519-experimental";
+  | "ecdsa-secp256k1";
 
 export function suiteForAsset(asset: Asset): TssSuite {
   switch (asset) {
     case "BTC":
       return "frost-secp256k1";
     case "ETH":
-    case "DAI":
+    case "BNB":
       return "ecdsa-secp256k1";
-    case "XMR":
-      return "frostlass-clsag";
-    case "ZEC":
-      return "frost-ed25519-experimental";
     default: {
       const exhaustive: never = asset;
       throw new Error(`unsupported asset ${exhaustive}`);

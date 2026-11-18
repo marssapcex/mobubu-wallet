@@ -1,24 +1,25 @@
 # fhe-swap v2 architecture — NYX hub, streaming swaps, sealed orderflow
 
-Status: **research/reference prototype**. This document describes the mechanism
-implemented in `src/` and the production gaps that remain. It is not an audit,
-not a mainnet deployment, and not a claim of production privacy.
+Status: **in-memory research simulation**. No live adapters, vault addresses,
+or chain signatures are provided. This describes the model implemented in `src/`,
+not a deployment, custody service, or claim of production privacy.
 
-External routable assets remain exactly:
+External routable assets are native coins on their own networks:
 
 ```text
-BTC, ETH, XMR, ZEC, DAI
+BTC — Bitcoin
+ETH — Ethereum
+BNB — BNB Smart Chain (bsc in the simulator)
 ```
 
-`NYX` is the project-native hub/settlement/security/fee asset. It is internal to
-the protocol. Users do not deposit/withdraw NYX as a sixth external swap asset in
-this reference implementation.
+`NYX` is the internal hub and fee accounting unit in the model. No NYX token is
+deployed or offered for deposit/withdrawal.
 
 ---
 
 ## 1. One mechanism
 
-**NYX-hub native settlement with sealed streaming orderflow.**
+**Simulated NYX-hub settlement with sealed streaming orderflow.**
 
 Every external swap is routed through NYX:
 
@@ -30,50 +31,42 @@ For example:
 
 ```text
 BTC -> NYX -> ETH
-XMR -> NYX -> ZEC
-DAI -> NYX -> BTC
+ETH -> NYX -> BNB
+BNB -> NYX -> BTC
 ```
 
-There are no wrapped BTC/ETH/XMR/ZEC/DAI IOUs. The vaults hold native assets on
-their native chains. NYX is used for hub liquidity, fees, node bonding rewards,
-and protocol-owned liquidity accounting.
+All six directed routes use the [shared native-asset catalog](../src/asset-catalog.mjs).
+The model routes balances without wrapped substitutes; mock vaults hold no real
+assets. NYX accounts for hub liquidity and simulated fees.
 
 The differentiator is not “another CLP fork”. It is the combination of:
 
-1. hub-token routing for all five native assets;
+1. hub routing in both directions for each of the three asset pairs;
 2. streaming sub-swaps with arbitrage rebalancing between sub-swaps;
 3. sealed/private orderflow opened only by a threshold committee;
-4. random L1 deposit tags and one-time vault deposit references;
+4. random deposit tags for mock inbound matching;
 5. epoch-delayed opening and optional outbound delay;
-6. FROST/FROSTLASS/ECDSA-TSS signer boundaries instead of a single hot key.
+6. an injected signer boundary exercised by an in-process mock.
 
 ---
 
 ## 2. Settlement flow
 
 ```text
-client
-  │ seal plaintext order with AES-GCM
-  │ split AES key into Shamir shares
+client (local dealer)
+  │ seal plaintext with AES-GCM and split key material into Shamir shares
   ▼
-private orderflow / relayer
-  │ sees only sealed blob + order id
+in-memory orderflow: sealed blob and order id
+  │ watcher matches a mock inbound by deposit tag, then pins its credit
   ▼
-vault committee
-  │ collect >= t shares
-  │ epoch-batched threshold opening
+engine checks confirmed funding, epoch boundary and >= t shares
+  │ opens plaintext inside the engine process
+  │ splits the order and routes at most one due chunk per tick
   ▼
-NYX hub engine
-  │ observe inbound by random deposit tag
-  │ confirm native inbound
-  │ split order into sub-swaps
-  │ route A -> NYX -> B
-  │ arb bots rebalance between sub-swaps
+mock signer and mock chain adapter
+  │ retain/retry each payout or refund with the same bytes and ID
   ▼
-threshold signer
-  │ FROST / FROSTLASS / ECDSA-TSS boundary
-  ▼
-native outbound broadcast or refund / partial refund
+observe source and all required outbound depths before final accounting
 ```
 
 The public orderflow layer does not see:
@@ -265,12 +258,15 @@ reference price `p_ref` scaled by `S = PRICE_SCALE`:
 ```text
 target_Y / target_X = p_ref / S
 
-target_X = floor(sqrt(k * S / p_ref))
-target_Y = floor(k / target_X)
+target_X ≈ sqrt(k * S / p_ref)
+target_Y ≈ sqrt(k * p_ref / S)
 ```
 
-The reference bot rebalances the pool toward this target when the spot price is
-outside a tolerance band.
+When outside the tolerance band, the bot uses the appropriate integer square
+root to propose the input-side reserve, then caps the delta in the units of that
+side. It executes the normal XYK swap with floor-rounded output, rather than
+assigning independently rounded reserves. It skips zero or non-improving trades;
+`k` cannot decrease due to rounding, but a bounded trade need not reach the band.
 
 `ReferencePriceArbBot` uses the pool’s configured reference price.
 `CexPriceArbBot` uses an external `CexPriceFeed`, for example a static Binance-mid
@@ -295,7 +291,7 @@ The reference uses:
 
 ```text
 AES-256-GCM sealed order
-Shamir secret sharing of the AES key over a 256-bit prime field
+Shamir secret sharing of the secret from which the AES key is derived
 threshold opening with >= t shares
 ```
 
@@ -316,7 +312,14 @@ FROST, Section 2.1 “Shamir Secret Sharing”:
 https://cypherpunks.ca/~iang/pubs/frost-sac20.pdf
 ```
 
-The AES-GCM tag authenticates the sealed order. Tampered ciphertext fails opening.
+The `threshold-aes-gcm-v2` envelope authenticates the version and committee ID
+as AES-GCM associated data. Validation requires canonical Base64, a 12-byte IV,
+a 16-byte tag and at most 4 KiB of ciphertext. Share indices must belong to the
+configured committee, and values must be canonical elements of the prime field.
+An accepted participant share cannot be overwritten by a conflicting retry.
+The opener deletes its share references after attempted reconstruction/opening
+and the engine discards pending shares in `needs_review`. This is not secure
+memory erasure or authentication of the participants.
 
 ### What this hides
 
@@ -334,12 +337,12 @@ From the public relayer/orderflow layer:
 
 - L1 inbound transaction existence, amount, timing, and address metadata;
 - L1 outbound transaction existence, amount, timing, and destination;
-- traffic analysis against the relayer or vault committee;
+- ciphertext length and traffic analysis against a relayer or the operator;
 - plaintext once the threshold committee opens the order;
-- chain-analysis links on transparent legs such as BTC/ETH/DAI.
+- chain-analysis links on transparent legs such as BTC/ETH/BNB.
 
-This is stronger than a public THORChain-style memo for orderflow privacy, but it
-is **not** full L1 anonymity.
+A sealed blob does not reveal the whole order as a public plaintext memo would.
+This does **not** establish real-chain unlinkability or a network privacy claim.
 
 Production gap: the reference dealer flow returns shares to the client for local
 testing. Production needs committee DKG, private share channels, verifiable share
@@ -347,13 +350,13 @@ submission, anti-censorship inclusion, and threshold decryption/opening policy.
 
 ---
 
-## 7. Epoch batching and deposit unlinkability
+## 7. Epoch batching and mock inbound matching
 
 Implemented in:
 
 ```text
 src/core/streaming.ts
-src/chains/vault.ts
+src/chains/mock.ts
 ```
 
 ### Proposition E1 — epoch opening boundary
@@ -364,11 +367,12 @@ For epoch length `E` and submission time `t`:
 openableAt = floor(t / E) * E + E
 ```
 
-If `E = 0`, opening is immediate. The engine refuses to open before `openableAt`.
+If `E = 0`, there is no epoch delay. The engine still requires confirmed funding
+and sufficient shares, and refuses to open before `openableAt`.
 
 ### Proposition D1 — random deposit tag
 
-The L1 deposit reference is:
+The mock deposit reference is:
 
 ```text
 depositTag = random 128-bit value
@@ -384,19 +388,10 @@ amount
 pair
 ```
 
-The vault keeps the private mapping:
-
-```text
-depositTag -> orderId
-```
-
-`OneTimeVaultBook` allocates fresh one-time vault deposit references and rejects
-reuse after marking used.
-
-Production gap: the reference address format is not a real Bitcoin/Ethereum/
-Monero/Zcash address derivation. Production must derive chain-valid one-time
-addresses from threshold vault public keys, handle dust/change/fees, and never
-reuse deposit addresses.
+The in-process record links the tag to the order. This tag is not an address
+or a mechanism for hiding deposits on a real chain. The placeholder one-time
+address book was removed because scanning used only the tag. No chain-specific
+address derivation, change tracking or payment validation is implemented.
 
 ---
 
@@ -413,15 +408,13 @@ Suite mapping:
 
 ```text
 BTC -> frost-secp256k1       (Schnorr/taproot-style reference boundary)
-ETH -> ecdsa-secp256k1       (Ethereum needs ECDSA, not FROST Schnorr)
-DAI -> ecdsa-secp256k1
-XMR -> frostlass-clsag       (threshold CLSAG)
-ZEC -> frost-ed25519-experimental
+ETH -> ecdsa-secp256k1       (Ethereum transactions)
+BNB -> ecdsa-secp256k1       (BNB Smart Chain transactions)
 ```
 
-Important correction: FROST produces Schnorr signatures. Ethereum does not
-natively verify Schnorr secp256k1 signatures, so ETH/DAI require threshold ECDSA,
-not FROST.
+FROST produces Schnorr signatures, not signatures for native EVM transactions.
+ETH and BNB use the ECDSA signing interface, but remain on separate networks
+with distinct policies, vaults, and transaction identities.
 
 ### FROST
 
@@ -435,68 +428,21 @@ Source:
 https://cypherpunks.ca/~iang/pubs/frost-sac20.pdf
 ```
 
-### FROSTLASS / Monero
-
-FROSTLASS thresholdizes Monero CLSAG. The Cypher Stack formalization is:
-
-```text
-https://eprint.iacr.org/2026/589.pdf
-```
-
-Relevant verified definition:
-
-```text
-Definition 2 (κ-OMDL): one-more-than-κ discrete logarithm assumption.
-```
-
-The paper’s abstract states FROSTLASS is strongly unforgeable up to the
-κ-one-more discrete logarithm problem and statistically linkable.
-
-The Rust implementation is in monero-oxide:
-
-```text
-https://github.com/monero-oxide/monero-oxide
-```
-
-Inspected commit:
-
-```text
-a6b46701fb9b331006d7f2f2278bf51f123b1447
-```
-
-Relevant paths:
-
-```text
-audits/FROSTLASS/FROSTLASS.pdf
-audits/FROSTLASS/README.md
-monero-oxide/ringct/clsag/src/multisig.rs
-monero-oxide/wallet/src/send/multisig.rs
-```
-
-`monero-oxide/ringct/clsag/src/multisig.rs` contains the FROST-inspired CLSAG
-multisig implementation. The crate license is MIT.
-
-Serai’s Monero library was transferred to monero-oxide:
-
-```text
-https://serai.exchange/2025/09/09/monero-serai-oxide.html
-```
-
 Production gap: `MockTssCluster` uses ed25519 member approvals and emits a mock
-transaction. It is **not** FROST, FROSTLASS, or ECDSA-TSS. Real vault signing must
+transaction. It is **not** FROST or ECDSA-TSS. Real vault signing must
 use audited implementations and chain-specific transaction builders.
 
 ---
 
 ## 9. FHE status
 
-The v1 BFV encrypted-intent path remains:
+Only the local BFV quote experiment remains of the single-shot path:
 
 ```text
 src/fhe/seal.ts
 src/core/intent.ts
 src/core/matcher.ts
-src/core/engine.ts
+src/cli-bfv.ts
 ```
 
 It uses:
@@ -505,7 +451,11 @@ It uses:
 node-seal 7.0.0 -> Microsoft SEAL 4.1.2 -> BFV leveled HE
 ```
 
-It is not bootstrapped TFHE/fhEVM.
+The isolated quote path checks intent/quote consistency and the arithmetic of
+the reported terms; it does not authenticate prices or settle anything. It is
+not bootstrapped TFHE/fhEVM. The separate source-built CGGI path evaluates
+public thresholds on encrypted unsigned integers (`GE_CONST`). It has no
+withdrawal authority and is not an orderflow backend. See [research notes](../../docs/NGHIEN-CUU-ZK-FHE.md).
 
 The v2 streaming path uses threshold sealed orderflow, not BFV, for private
 orderflow. A production version can replace or augment the sealed-order layer
@@ -523,14 +473,13 @@ here.
 | Destination | public memo | sealed until opening; outbound L1 still visible |
 | Refund address | public memo/origin | sealed until opening |
 | Streaming params | public memo | sealed until opening |
-| Deposit reference | memo/order link | random deposit tag + one-time vault reference |
+| Deposit reference | memo/order link | random mock deposit tag (no chain address) |
 | Opening | public | epoch-delayed threshold opening |
 | Outbound timing | immediate/queue | optional outbound delay |
 | Transparent L1 legs | visible | still visible |
-| Shielded L1 legs | depends on asset | XMR/ZEC can be shielded if adapters/wallets do it correctly |
 
-This is a meaningful orderflow-privacy improvement, not a proof of full
-cross-chain anonymity.
+The comparison is about which fields a sealed envelope contains, not a
+measurement of cross-chain anonymity.
 
 ---
 
@@ -538,29 +487,28 @@ cross-chain anonymity.
 
 Implemented and tested:
 
-- exact five-asset allow-list;
+- exact three-asset allow-list, with mock settlement for all six directions;
 - NYX hub pools and two-leg routing;
 - NYX fee treasury split;
 - streaming split and proportional sub-swap limits;
-- partial settlement and refund semantics;
+- partial settlement/refund with pinned credits, funding checks before new signatures/broadcasts, per-leg retry without resigning, and independent confirmation observations before completion;
 - arb rebalancing simulation;
 - CEX price-feed interface and static feed;
 - sealed orderflow with Shamir threshold opening;
 - epoch-delayed opening;
 - random deposit tags;
-- one-time vault deposit book;
 - TSS suite mapping and mock threshold approvals;
-- v1 BFV encrypted quote path.
+- isolated BFV quote and CGGI public-threshold experiments.
 
-Mocked / reference only:
+Not implemented for real chains:
 
-- chain adapters for real networks;
+- real network RPC adapters, indexers and transaction builders;
 - real one-time vault address derivation;
-- real FROST/FROSTLASS/ECDSA-TSS signing;
+- real FROST/ECDSA-TSS signing;
 - real CEX connectors;
 - real profit-maximizing arb bots;
 - threshold DKG and private share channels;
-- outbound confirmation/reorg handling;
+- durable outbox, restart recovery and chain-specific finality/reorg handling;
 - fee estimation, dust, change, address validation;
 - production FHE/TFHE backend;
 - network-level privacy.
@@ -578,18 +526,14 @@ npm test
 npm run demo
 ```
 
-Current suite:
-
-```text
-# tests 61
-# pass 61
-# fail 0
-```
+The full suite builds the CGGI worker from pinned source and exercises the
+mock settlement fault cases, ciphertext arithmetic, and v2 streaming path.
+A separate EVM/Rust integration suite is run from the repository root.
 
 Demo shape:
 
 ```text
-NYX hub streaming demo — native BTC/ETH/XMR/ZEC/DAI, no wrapped assets
+NYX hub streaming simulation — mock chains, no real funds
 Route: BTC -> NYX -> ETH, sealed orderflow, threshold opening, arb between subswaps
 state: completed
 subswaps: 5

@@ -4,8 +4,8 @@ import { type Asset, meta } from "../assets.js";
  * THORChain-style common precision: 8 decimals ("thor units").
  *
  * The FHE plaintext modulus is finite, so the prototype normalizes amounts to
- * 1e8 base units before encryption. This is enough for BTC/ZEC sats and gives a
- * workable fixed-point range for ETH/XMR/DAI in a reference implementation.
+ * 1e8 units per coin before encryption. This preserves BTC sats and gives a
+ * workable fixed-point range for ETH/BNB in a reference implementation.
  * Production should use multi-limb ciphertexts or a TFHE integer backend.
  */
 export const THOR_DECIMALS = 8;

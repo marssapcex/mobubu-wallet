@@ -5,6 +5,7 @@ import type {
   EncryptedSwapIntent,
   PoolQuote,
 } from "./types.js";
+import { assertIntentId } from "./intent.js";
 import { PRICE_SCALE } from "./units.js";
 
 const BPS_DENOMINATOR = 10_000n;
@@ -43,6 +44,7 @@ export class EncryptedMatcher {
   constructor(private readonly evaluator: FheEvaluator) {}
 
   quote(intent: EncryptedSwapIntent, pool: PoolQuote): EncryptedQuote {
+    assertIntentId(intent);
     if (
       intent.header.pair.from !== pool.pair.from ||
       intent.header.pair.to !== pool.pair.to
@@ -95,13 +97,14 @@ export class EncryptedMatcher {
 
 /**
  * Client-side quote opening. Besides decrypting, this verifies the public
- * arithmetic binding so a malformed/tampered quote is rejected before deposit.
+ * arithmetic for the reported terms. This does not authenticate the price or authorize settlement.
  */
 export function decryptQuote(
   client: FheClient,
   intent: EncryptedSwapIntent,
   quote: EncryptedQuote,
 ): DecryptedQuote {
+  assertIntentId(intent);
   if (quote.intentId !== intent.header.id) {
     throw new Error("quote intent id mismatch");
   }

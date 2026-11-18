@@ -12,7 +12,7 @@ describe("CEX reference price feed and arb bot", () => {
       ETH: 50_000n * PRICE_SCALE,
     });
     assert.equal(feed.priceNyxPerAssetScaled("BTC"), 1_000_000n * PRICE_SCALE);
-    assert.throws(() => feed.priceNyxPerAssetScaled("XMR"), /no reference price/);
+    assert.throws(() => feed.priceNyxPerAssetScaled("BNB"), /no reference price/);
   });
 
   it("cex arb bot rebalances a drifted pool toward the external price", () => {
@@ -22,6 +22,7 @@ describe("CEX reference price feed and arb bot", () => {
       reserveNyxThor: 10_000_000n,
       referencePriceNyxPerAssetScaled: 10n * PRICE_SCALE,
       maxInputThor: 1_000_000n,
+      maxNyxInputThor: 10_000_000n,
     });
     pool.executeAssetToNyx(200_000n);
     const feed = new StaticCexPriceFeed("binance-static", {

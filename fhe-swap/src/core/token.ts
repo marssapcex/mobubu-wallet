@@ -1,8 +1,8 @@
 /**
  * Native project token.
  *
- * The external asset allow-list remains exactly BTC, ETH, XMR, ZEC, DAI.
- * NYX is an internal settlement/security/fee asset, not a sixth external
+ * The external asset allow-list is exactly BTC, ETH and BNB.
+ * NYX is an internal settlement/security/fee asset, not a fourth external
  * swap asset. Users do not route NYX as an external deposit/withdraw asset in
  * this reference implementation.
  */

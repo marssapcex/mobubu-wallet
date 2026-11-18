@@ -15,7 +15,7 @@ import type {
  *   a leveled HE engine for encrypted swap intents/quotes.
  * - It is NOT a drop-in production TFHE/fhEVM deployment. The `FheClient` /
  *   `FheEvaluator` interfaces exist so a TFHE-rs / OpenFHE / fhEVM backend can be
- *   substituted without rewriting settlement code.
+ *   substituted in the local quote experiment; this is not a custody path.
  * - The matcher receives only `PublicBundle` and ciphertexts. It has no secret
  *   key and no decrypt function.
  */
@@ -248,11 +248,6 @@ export class SealFheClient implements FheClient {
     plain.delete();
     cipher.delete();
     return values;
-  }
-
-  exportSecretKey(): string {
-    if (!this.h.secretKey) throw new Error("no secret key");
-    return this.h.secretKey.saveToBase64(compr(this.h.seal)) as string;
   }
 }
 

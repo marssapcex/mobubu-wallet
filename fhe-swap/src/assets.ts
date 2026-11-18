@@ -1,69 +1,19 @@
-/**
- * Hard asset allow-list.
- *
- * The protocol ONLY supports these five assets. Anything else is rejected at
- * the boundary (intent creation, vault routing, settlement). This is a deliberate
- * constraint from the spec: BTC, ETH, XMR, ZEC, DAI. No RUNE, no synthetic assets,
- * no wrapped derivatives beyond DAI (which is an ERC-20 on Ethereum).
- */
+import { ASSET_META } from "./asset-catalog.mjs";
 
-export const SUPPORTED_ASSETS = ["BTC", "ETH", "XMR", "ZEC", "DAI"] as const;
-export type Asset = (typeof SUPPORTED_ASSETS)[number];
-
-export type Chain = "bitcoin" | "ethereum" | "monero" | "zcash";
+// Streaming/BFV uses only the default network of each native coin. No wrapped aliases.
+export { ASSET_META };
+export type Asset = keyof typeof ASSET_META;
+export type Chain = (typeof ASSET_META)[Asset]["chain"];
+export const SUPPORTED_ASSETS = Object.freeze(Object.keys(ASSET_META) as Asset[]);
 
 export interface AssetMeta {
-  asset: Asset;
-  chain: Chain;
+  readonly asset: Asset;
+  readonly chain: Chain;
   /** Base-unit decimals (e.g. BTC has 8 -> 1 BTC = 100_000_000 sats). */
-  decimals: number;
-  /** Whether the base chain has native shielded transfers. */
-  shielded: boolean;
-  /** DAI settles on Ethereum as an ERC-20; everything else is native. */
-  erc20?: { contract: string };
+  readonly decimals: number;
   /** Human label. */
-  name: string;
+  readonly name: string;
 }
-
-export const ASSET_META: Record<Asset, AssetMeta> = {
-  BTC: {
-    asset: "BTC",
-    chain: "bitcoin",
-    decimals: 8,
-    shielded: false,
-    name: "Bitcoin",
-  },
-  ETH: {
-    asset: "ETH",
-    chain: "ethereum",
-    decimals: 18,
-    shielded: false,
-    name: "Ether",
-  },
-  XMR: {
-    asset: "XMR",
-    chain: "monero",
-    decimals: 12,
-    shielded: true,
-    name: "Monero",
-  },
-  ZEC: {
-    asset: "ZEC",
-    chain: "zcash",
-    decimals: 8,
-    shielded: true,
-    name: "Zcash",
-  },
-  DAI: {
-    asset: "DAI",
-    chain: "ethereum",
-    decimals: 18,
-    shielded: false,
-    // Mainnet MakerDAO DAI. Override via config for testnets.
-    erc20: { contract: "0x6B175474E89094C44Da98b954EedeAC495271d0F" },
-    name: "Dai Stablecoin",
-  },
-};
 
 export class UnsupportedAssetError extends Error {
   constructor(value: string) {
@@ -75,10 +25,7 @@ export class UnsupportedAssetError extends Error {
 }
 
 export function isAsset(value: unknown): value is Asset {
-  return (
-    typeof value === "string" &&
-    (SUPPORTED_ASSETS as readonly string[]).includes(value)
-  );
+  return typeof value === "string" && Object.hasOwn(ASSET_META, value);
 }
 
 export function assertAsset(value: unknown): Asset {
@@ -89,11 +36,11 @@ export function assertAsset(value: unknown): Asset {
 }
 
 export function meta(asset: Asset): AssetMeta {
-  return ASSET_META[asset];
+  return ASSET_META[assertAsset(asset)];
 }
 
 export function chainOf(asset: Asset): Chain {
-  return ASSET_META[asset].chain;
+  return meta(asset).chain;
 }
 
 /** Convert a human amount string to base units (bigint). */

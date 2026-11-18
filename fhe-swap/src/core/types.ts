@@ -1,15 +1,5 @@
-import type { Asset, Chain } from "../assets.js";
-import type { EncryptedVector, PublicBundle } from "../fhe/types.js";
-
-export type SwapState =
-  | "created"
-  | "inbound_observed"
-  | "inbound_confirmed"
-  | "outbound_signed"
-  | "outbound_broadcast"
-  | "completed"
-  | "refunded"
-  | "failed";
+import type { Asset } from "../assets.js";
+import type { EncryptedVector } from "../fhe/types.js";
 
 export interface SwapPair {
   from: Asset;
@@ -76,59 +66,4 @@ export interface DecryptedQuote {
   feeThor: bigint;
   /** Whether the user's encrypted minOut was satisfied (checked client-side). */
   meetsMinOut: boolean;
-}
-
-export interface InboundObservation {
-  intentId: string;
-  chain: Chain;
-  asset: Asset;
-  txHash: string;
-  /** Observed amount in native base units. */
-  amountBaseUnits: bigint;
-  confirmations: number;
-  /** Adapter clock convention; the engine does not rely on this field. */
-  observedAt: number;
-}
-
-export interface OutboundInstruction {
-  intentId: string;
-  chain: Chain;
-  asset: Asset;
-  to: string;
-  amountBaseUnits: bigint;
-  memoHash?: string;
-}
-
-export interface SignedOutbound {
-  intentId: string;
-  chain: Chain;
-  rawTx: string;
-  txHash: string;
-}
-
-export interface SwapRecord {
-  header: SwapIntentHeader;
-  state: SwapState;
-  inbound?: InboundObservation;
-  outbound?: OutboundInstruction;
-  signed?: SignedOutbound;
-  quote?: EncryptedQuote;
-  error?: string;
-  /** Unix seconds. */
-  createdAt: number;
-  /** Unix seconds. */
-  updatedAt: number;
-}
-
-export interface VaultConfig {
-  asset: Asset;
-  address: string;
-  requiredConfirmations: number;
-}
-
-export interface ProtocolConfig {
-  fhe: PublicBundle;
-  vaults: VaultConfig[];
-  /** If true, reject transparent->transparent swaps when strict privacy is requested. */
-  requireShieldedLeg?: boolean;
 }

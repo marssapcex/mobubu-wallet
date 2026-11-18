@@ -1,9 +1,11 @@
 import { describe, it, before } from "node:test";
+import type { Asset } from "../src/assets.js";
 import assert from "node:assert/strict";
 import { SealFheClient, SealFheEvaluator } from "../src/fhe/seal.js";
 import {
   createEncryptedIntent,
   decryptIntentAmounts,
+  intentId,
 } from "../src/core/intent.js";
 import {
   EncryptedMatcher,
@@ -26,56 +28,60 @@ describe("encrypted intent + matcher", () => {
   });
 
   const pool = new ReferencePool({
-    pair: { from: "XMR", to: "ZEC" },
+    pair: { from: "BNB", to: "BTC" },
     reserveInThor: 10_000_000_000n,
-    reserveOutThor: 20_000_000_000n,
+    reserveOutThor: 50_000_000n,
     feeBps: 30,
     maxInputThor: 1_000_000_000n,
   });
 
   it("creates an encrypted intent only the client can open", () => {
     const intent = createEncryptedIntent(client, {
-      from: "XMR",
-      to: "ZEC",
+      from: "BNB",
+      to: "BTC",
       amount: "1.0",
-      minOut: "1.9",
-      destination: "zec-dest",
-      refundAddress: "xmr-refund",
+      minOut: "0.0049",
+      destination: "btc-dest",
+      refundAddress: "bnb-refund",
       deadline: Math.floor(Date.now() / 1000) + 3600,
     });
     const opened = decryptIntentAmounts(client, intent);
-    assert.equal(opened.amountThor, toThorUnits("XMR", 10n ** 12n));
-    assert.equal(opened.minOutThor, toThorUnits("ZEC", 190_000_000n));
+    assert.equal(opened.amountThor, toThorUnits("BNB", 10n ** 18n));
+    assert.equal(opened.minOutThor, toThorUnits("BTC", 490_000n));
     assert.ok(opened.salt >= 0n);
   });
 
-  it("rejects unsupported assets at intent boundary", () => {
-    assert.throws(() =>
-      createEncryptedIntent(client, {
-        from: "RUNE" as any,
-        to: "XMR",
-        amount: "1",
-        minOut: "1",
-        destination: "d",
-        refundAddress: "r",
-        deadline: Math.floor(Date.now() / 1000) + 3600,
-      }),
-    );
+  it("rejects wrapped assets at the intent and quote boundaries", () => {
+    const input = {
+      ...pool.quote().pair,
+      amount: "1", minOut: "1",
+      destination: "d", refundAddress: "r", deadline: 1_000_000,
+    };
+    const intent = createEncryptedIntent(client, input);
+    for (const wrapped of ["WBNB", "WBTC", "WETH", "BTCB"]) {
+      const asset = wrapped as Asset;
+      assert.throws(() => createEncryptedIntent(client, { ...input, from: asset }), /Unsupported asset/);
+      assert.throws(() => createEncryptedIntent(client, { ...input, to: asset }), /Unsupported asset/);
+      const pair = { from: input.from, to: asset };
+      const header = { ...intent.header, pair };
+      header.id = intentId(header, intent.payload.values.ciphertext);
+      assert.throws(() => matcher.quote({ ...intent, header }, { ...pool.quote(), pair }), /Unsupported asset/);
+    }
   });
 
   it("computes encrypted quote matching plaintext expectation", () => {
     const intent = createEncryptedIntent(client, {
-      from: "XMR",
-      to: "ZEC",
+      from: "BNB",
+      to: "BTC",
       amount: "1.0",
-      minOut: "1.9",
-      destination: "zec-dest",
-      refundAddress: "xmr-refund",
+      minOut: "0.0049",
+      destination: "btc-dest",
+      refundAddress: "bnb-refund",
       deadline: Math.floor(Date.now() / 1000) + 3600,
     });
     const quote = matcher.quote(intent, pool.quote());
     const decrypted = decryptQuote(client, intent, quote);
-    const amountThor = toThorUnits("XMR", 10n ** 12n);
+    const amountThor = toThorUnits("BNB", 10n ** 18n);
     assert.equal(decrypted.netOutThor, expectedNetOutThor(amountThor, pool.quote()));
     assert.equal(decrypted.feeThor, expectedFeeThor(amountThor, pool.quote()));
     assert.equal(decrypted.meetsMinOut, true);
@@ -83,12 +89,12 @@ describe("encrypted intent + matcher", () => {
 
   it("detects minOut failure client-side", () => {
     const intent = createEncryptedIntent(client, {
-      from: "XMR",
-      to: "ZEC",
+      from: "BNB",
+      to: "BTC",
       amount: "1.0",
-      minOut: "2.5",
-      destination: "zec-dest",
-      refundAddress: "xmr-refund",
+      minOut: "0.0055",
+      destination: "btc-dest",
+      refundAddress: "bnb-refund",
       deadline: Math.floor(Date.now() / 1000) + 3600,
     });
     const quote = matcher.quote(intent, pool.quote());
@@ -98,19 +104,19 @@ describe("encrypted intent + matcher", () => {
 
   it("rejects pool parameters that overflow the plaintext modulus", () => {
     const badPool = new ReferencePool({
-      pair: { from: "XMR", to: "ZEC" },
+      pair: { from: "BNB", to: "BTC" },
       reserveInThor: 1n,
       reserveOutThor: 10n ** 12n,
       feeBps: 30,
       maxInputThor: 10n ** 12n,
     });
     const intent = createEncryptedIntent(client, {
-      from: "XMR",
-      to: "ZEC",
+      from: "BNB",
+      to: "BTC",
       amount: "1.0",
       minOut: "1.0",
-      destination: "zec-dest",
-      refundAddress: "xmr-refund",
+      destination: "btc-dest",
+      refundAddress: "bnb-refund",
       deadline: Math.floor(Date.now() / 1000) + 3600,
     });
     assert.throws(() => matcher.quote(intent, badPool.quote()), /overflow/);

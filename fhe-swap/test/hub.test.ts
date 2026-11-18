@@ -34,6 +34,7 @@ describe("NYX hub pools and router", () => {
       reserveNyxThor: 10_000_000n,
       referencePriceNyxPerAssetScaled: 10n * PRICE_SCALE,
       maxInputThor: 1_000_000n,
+      maxNyxInputThor: 10_000_000n,
     });
     pool.executeAssetToNyx(200_000n);
     const before = pool.priceNyxPerAssetScaled();
@@ -44,6 +45,32 @@ describe("NYX hub pools and router", () => {
     const ref = 10n * PRICE_SCALE;
     const diff = after > ref ? after - ref : ref - after;
     assert.ok(diff * 10_000n <= ref * 5n);
+  });
+
+  it("simulated arbitrage preserves XYK rounding and respects input caps in either direction", () => {
+    for (const buyAsset of [true, false]) {
+      const pool = new HubPool({
+        asset: "BTC", reserveAssetThor: 1_000n, reserveNyxThor: 10_000n,
+        referencePriceNyxPerAssetScaled: (buyAsset ? 20n : 5n) * PRICE_SCALE,
+        maxInputThor: 7n, maxNyxInputThor: 100n,
+      });
+      const before = pool.reserves();
+      const cap = buyAsset ? 100n : 7n;
+      const expected = buyAsset ? pool.quoteNyxToAsset(cap) : pool.quoteAssetToNyx(cap);
+      const action = pool.rebalanceToReference(0);
+      assert.ok(action);
+      assert.equal(action.direction, buyAsset ? "nyx-in-asset-out" : "asset-in-nyx-out");
+      assert.equal(action.inputThor, cap);
+      assert.equal(action.outputThor, expected.amountOutThor);
+      assert.equal(action.afterPriceScaled, pool.priceNyxPerAssetScaled());
+      const after = pool.reserves();
+      assert.deepEqual(after, buyAsset ? {
+        assetThor: before.assetThor - action.outputThor, nyxThor: before.nyxThor + cap,
+      } : {
+        assetThor: before.assetThor + cap, nyxThor: before.nyxThor - action.outputThor,
+      });
+      assert.ok(after.assetThor * after.nyxThor >= before.assetThor * before.nyxThor);
+    }
   });
 
   it("routes A -> NYX -> B and collects fee in NYX", () => {

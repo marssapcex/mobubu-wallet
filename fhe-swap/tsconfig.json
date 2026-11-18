@@ -3,11 +3,15 @@
     "target": "ES2022",
     "module": "NodeNext",
     "moduleResolution": "NodeNext",
-    "lib": ["ES2022"],
+    "lib": [
+      "ES2022"
+    ],
     "outDir": "dist",
     "rootDir": ".",
     "strict": true,
-    "noImplicitAny": true,
+    "allowJs": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
     "esModuleInterop": true,
     "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true,
@@ -15,6 +19,15 @@
     "sourceMap": true,
     "resolveJsonModule": true
   },
-  "include": ["src/**/*.ts", "test/**/*.ts"],
-  "exclude": ["node_modules", "dist", "vendor"]
+  "include": [
+    "src/**/*.ts",
+    "src/asset-catalog.mjs",
+    "test/**/*.ts",
+    "bench/**/*.ts"
+  ],
+  "exclude": [
+    "node_modules",
+    "dist",
+    "vendor"
+  ]
 }

@@ -1,30 +1,55 @@
 import type { Asset, Chain } from "../assets.js";
-import type {
-  InboundObservation,
-  OutboundInstruction,
-  SignedOutbound,
-} from "../core/types.js";
+
+export interface InboundObservation {
+  /** Mock deposit tag, not the sealed order ID. */
+  depositTag: string;
+  chain: Chain;
+  asset: Asset;
+  txHash: string;
+  /** Observed amount in native base units. */
+  amountBaseUnits: bigint;
+  confirmations: number;
+  /** Adapter clock convention; the engine does not rely on this field. */
+  observedAt: number;
+}
+
+export interface OutboundInstruction {
+  orderId: string;
+  chain: Chain;
+  asset: Asset;
+  to: string;
+  amountBaseUnits: bigint;
+  memoHash?: string;
+}
+
+export interface SignedOutbound {
+  orderId: string;
+  chain: Chain;
+  rawTx: string;
+  txHash: string;
+}
 
 export interface ChainAdapter {
   readonly chain: Chain;
   readonly assets: readonly Asset[];
 
-  vaultAddress(asset: Asset): string;
   requiredConfirmations(asset: Asset): number;
+  /** Finality policy for outbound and refund; defaults to the inbound policy. */
+  requiredOutboundConfirmations?(asset: Asset): number;
 
-  /** Watch-only inbound scan for a vault deposit carrying the intent memo. */
-  scanInbound(intentId: string, asset: Asset): Promise<InboundObservation | null>;
+  /** Find the mock inbound associated with a deposit tag and asset. */
+  scanInbound(depositTag: string, asset: Asset): Promise<InboundObservation | null>;
   getConfirmations(txHash: string): Promise<number>;
 
   /** Build an unsigned outbound transaction from vault funds. */
   buildOutbound(instruction: OutboundInstruction): Promise<string>;
+  /** Retries of identical signed bytes must report the same canonical transaction ID. */
   broadcast(rawTx: string): Promise<string>;
 }
 
 /**
- * Threshold vault signer (Serai-style FROST / THORChain-style TSS slot).
- * The private key never lives in this process; signing is delegated to a
- * threshold cluster or hardware signer.
+ * Mock settlement signing boundary. The implementation in this package issues
+ * in-process approvals, not chain signatures or custody transactions.
  */
 export interface ThresholdSigner {
   sign(
@@ -32,17 +57,4 @@ export interface ThresholdSigner {
     asset: Asset,
     unsignedTx: string,
   ): Promise<{ rawTx: string; txHash: string }>;
-}
-
-export class MockThresholdSigner implements ThresholdSigner {
-  async sign(
-    chain: Chain,
-    asset: Asset,
-    unsignedTx: string,
-  ): Promise<{ rawTx: string; txHash: string }> {
-    const { createHash } = await import("node:crypto");
-    const rawTx = `signed:${chain}:${asset}:${unsignedTx}`;
-    const txHash = createHash("sha256").update(rawTx).digest("hex");
-    return { rawTx, txHash };
-  }
 }

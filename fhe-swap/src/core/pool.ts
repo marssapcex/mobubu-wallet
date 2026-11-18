@@ -1,6 +1,6 @@
-import { assertAsset, type Asset } from "../assets.js";
+import { assertAsset } from "../assets.js";
 import type { PoolQuote, SwapPair } from "./types.js";
-import { PRICE_SCALE, scalePrice } from "./units.js";
+import { scalePrice } from "./units.js";
 
 export interface PoolConfig {
   pair: SwapPair;
@@ -48,40 +48,5 @@ export class ReferencePool {
       feeBps: this.cfg.feeBps,
       maxInputThor: this.cfg.maxInputThor,
     };
-  }
-
-  /** Net output for a known input under the same fixed-price rule as the matcher. */
-  spotOutThor(amountInThor: bigint): bigint {
-    if (amountInThor <= 0n) throw new Error("amount must be positive");
-    if (amountInThor > this.cfg.maxInputThor) {
-      throw new Error("amount exceeds pool maxInputThor");
-    }
-    const q = this.quote();
-    const netMultiplier = q.priceScaled * BigInt(10_000 - this.cfg.feeBps);
-    return (amountInThor * netMultiplier) / (PRICE_SCALE * 10_000n);
-  }
-}
-
-export function pairKey(from: Asset, to: Asset): string {
-  return `${from}->${to}`;
-}
-
-export class PoolBook {
-  private pools = new Map<string, ReferencePool>();
-
-  add(pool: ReferencePool): void {
-    this.pools.set(pairKey(pool.cfg.pair.from, pool.cfg.pair.to), pool);
-  }
-
-  get(pair: SwapPair): ReferencePool {
-    const pool = this.pools.get(pairKey(pair.from, pair.to));
-    if (!pool) {
-      throw new Error(`no pool for ${pair.from}->${pair.to}`);
-    }
-    return pool;
-  }
-
-  has(pair: SwapPair): boolean {
-    return this.pools.has(pairKey(pair.from, pair.to));
   }
 }

@@ -1,0 +1,23 @@
+{
+  "name": "mobubu-groth16-archive",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Archived BN254 vaults and note simulation. Not the Mobubu deposit or withdrawal path.",
+  "type": "module",
+  "license": "ISC",
+  "engines": { "node": ">=22.13.0" },
+  "scripts": {
+    "setup:local": "node scripts/zk-local-setup.mjs",
+    "test": "node --test --test-concurrency=1 \"test/*.test.mjs\"",
+    "test:rust": "bash scripts/test-zk-rust.sh",
+    "demo:notes": "node scripts/demo-note-market.mjs"
+  },
+  "devDependencies": {
+    "circom2": "0.2.23",
+    "circomlib": "2.0.5",
+    "poseidon-lite": "0.3.0",
+    "poseidon-solidity": "0.0.5",
+    "snarkjs": "0.7.6"
+  },
+  "overrides": { "jsonpath": { "underscore": "1.13.8" } }
+}
