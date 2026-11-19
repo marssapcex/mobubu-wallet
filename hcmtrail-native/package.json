@@ -1,10 +1,12 @@
 {
   "name": "hcmtrail-native-oracle-lab",
   "version": "0.1.0",
-  "description": "Four native custody vaults, Chainlink epochs and FHE experiments; no interchain settlement or public deployment",
+  "description": "Four native STARK vaults, Chainlink epochs and Zama FHEVM quotes; no interchain settlement or public deployment",
   "private": true,
   "type": "module",
-  "engines": {"node": ">=22.13.0"},
+  "engines": {
+    "node": ">=22.13.0"
+  },
   "scripts": {
     "build": "node scripts/compile.mjs",
     "test": "node --test test/oracle.test.mjs",
@@ -15,9 +17,13 @@
     "demo": "node scripts/local-demo.mjs",
     "test:fhe": "bash scripts/test-fhe.sh",
     "test:stark": "bash scripts/test-stark-reference.sh",
-    "bundle": "bash scripts/bundle-source.sh"
+    "bundle": "bash scripts/bundle-source.sh",
+    "build:fhe": "node scripts/build-fhe.mjs",
+    "test:fhe:evm": "node --test test/zama-quote.test.mjs",
+    "test:fhe:trace": "bash scripts/test-fhe.sh --trace"
   },
   "devDependencies": {
+    "@fhevm/solidity": "0.13.4",
     "@nomicfoundation/edr": "0.25.1",
     "@tvmjs/common": "1.2.0",
     "@tvmjs/tvm": "1.2.0",
@@ -25,5 +31,7 @@
     "ethers": "6.17.0",
     "solc": "0.8.24"
   },
-  "overrides": {"tmp": "0.2.7"}
+  "overrides": {
+    "tmp": "0.2.7"
+  }
 }

@@ -2,6 +2,13 @@
 set -euo pipefail
 umask 077
 root=$(cd "$(dirname "$0")/.." && pwd)
+source="$root/lab/tfhe_quote.cpp"
+if [[ $# == 1 && $1 == --trace ]]; then
+  source="$root/lab/tfhe_trace.cpp"
+elif [[ $# != 0 ]]; then
+  echo 'Usage: test-fhe.sh [--trace]' >&2
+  exit 2
+fi
 if [[ $(uname -s) != Linux || $(uname -m) != x86_64 ]]; then
   echo 'The TFHE experiment currently targets Linux x86-64.' >&2
   exit 1
@@ -17,10 +24,24 @@ mkdir "$work/source"
 tar -xzf "$work/tfhe.tar.gz" --strip-components=1 -C "$work/source"
 patch -d "$work/source" -p1 --batch < "$root/lab/tfhe-os-rng.patch"
 lib="$work/source/src/libtfhe"
-fft="$lib/fft_processors/nayuki"
-"${CC:-cc}" -std=c99 -O3 -DNDEBUG -fwrapv -c "$fft/fft-x8664-avx-aux.c" -o "$work/fft-aux.o"
-"${CC:-cc}" -std=c99 -O3 -DNDEBUG -fwrapv -c "$fft/fft-model-of-x8664-avx.c" -o "$work/fft-model.o"
-"${CXX:-c++}" -std=c++11 -O2 -DNDEBUG -fwrapv -I"$work/source/src/include" -I"$root/lab" -I"$fft" \
-  "$root/lab/tfhe_quote.cpp" "$lib"/*.cpp "$fft/fft_processor_nayuki.cpp" "$fft/lagrangehalfc_impl.cpp" \
-  "$work/fft-aux.o" "$work/fft-model.o" -Wl,-z,noexecstack -lm -o "$work/lab-tfhe"
-"$work/lab-tfhe"
+arch=()
+if [[ $# == 1 ]] && grep -qw avx2 /proc/cpuinfo && grep -qw fma /proc/cpuinfo; then
+  # Use the pinned upstream fast FFT for the larger trace, only on an appropriate CPU.
+  fft="$lib/fft_processors/spqlios"
+  arch=(-mavx2 -mfma)
+  fft_sources=("$fft/spqlios-fft-impl.cpp" "$fft/fft_processor_spqlios.cpp" "$fft/lagrangehalfc_impl.cpp"
+    "$fft/spqlios-fft-fma.s" "$fft/spqlios-ifft-fma.s" "$fft/lagrangehalfc_impl_fma.s")
+  echo 'TFHE trace backend: SPQLIOS FMA'
+else
+  fft="$lib/fft_processors/nayuki"
+  "${CC:-cc}" -std=c99 -O3 -DNDEBUG -fwrapv -c "$fft/fft-x8664-avx-aux.c" -o "$work/fft-aux.o"
+  "${CC:-cc}" -std=c99 -O3 -DNDEBUG -fwrapv -c "$fft/fft-model-of-x8664-avx.c" -o "$work/fft-model.o"
+  fft_sources=("$fft/fft_processor_nayuki.cpp" "$fft/lagrangehalfc_impl.cpp" "$work/fft-aux.o" "$work/fft-model.o")
+fi
+"${CXX:-c++}" -std=c++11 -O2 -DNDEBUG -fwrapv "${arch[@]}" -I"$work/source/src/include" -I"$root/lab" -I"$fft" \
+  "$source" "$lib"/*.cpp "${fft_sources[@]}" -Wl,-z,noexecstack -lm -o "$work/lab-tfhe"
+if [[ $# == 1 ]]; then
+  TFHE_TRACE_EVALUATOR="$work/lab-tfhe" node --test "$root/test/zama-tfhe-trace.test.mjs"
+else
+  "$work/lab-tfhe"
+fi

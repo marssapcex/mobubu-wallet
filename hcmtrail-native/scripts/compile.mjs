@@ -8,9 +8,12 @@ import solc from 'solc';
 const base = new URL('../', import.meta.url);
 const tronCompilerHash = '82605d2d64d9bcc2ab0b7608d192463de009a8ece6032058d4cbdbefbde87e78';
 
-export function compileSolidity(paths, { tvm = false, settings = {} } = {}) {
-  const input = JSON.stringify({ language: 'Solidity',
-    sources: Object.fromEntries(paths.map((path) => [path, { content: readFileSync(new URL(path, base), 'utf8') }])),
+export function compileSolidity(paths, { tvm = false, settings = {}, dependencies = [] } = {}) {
+  const sources = paths.map((path) => [path, { content: readFileSync(new URL(path, base), 'utf8') }]);
+  for (const path of dependencies) {
+    sources.push([path, { content: readFileSync(new URL(`node_modules/${path}`, base), 'utf8') }]);
+  }
+  const input = JSON.stringify({ language: 'Solidity', sources: Object.fromEntries(sources),
     settings: { evmVersion: 'paris', optimizer: { enabled: true, runs: 200 },
       outputSelection: { '*': { '*': ['abi', 'evm.bytecode.object', 'evm.deployedBytecode.object', 'evm.deployedBytecode.immutableReferences'] } },
       ...settings } });

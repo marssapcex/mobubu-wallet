@@ -41,9 +41,11 @@ function pins({ prepare, walk }) {
 }
 
 export function compileVaults({ tvm = false, fixtures = false, pinsOnly = false } = {}) {
-  const paths = files(pinsOnly ? nonos : 'contracts');
-  if (fixtures) paths.push(fixture);
   const entryPoints = vaults.filter(([symbol]) => (symbol === 'TRX') === tvm);
+  // Never send the separate FHEVM host contracts (or their npm dependencies) to tron-solc.
+  const paths = files(nonos);
+  if (!pinsOnly) paths.push('contracts/NativeAssets.sol', ...files('contracts/vault'), ...entryPoints.map(([, path]) => path));
+  if (fixtures) paths.push(fixture);
   const { artifact } = compileSolidity(paths, { tvm, settings: { metadata: { bytecodeHash: 'none' } } });
   const stack = { prepare: artifact(prepare, 'PrepareNb_A'), walk: artifact(walk, 'WalkNb_A') };
   if (pinsOnly) return pins(stack);
