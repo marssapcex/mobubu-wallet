@@ -1,15 +1,15 @@
-# hcmtrail native · Oracle lab
+# hcmtrail native · Lab vault và oracle
 
-**Mã nguồn riêng cho hướng mới, chưa phải mixer.** Không nhận tiền, không có địa chỉ triển khai công khai, không có quyền chi hay verifier settlement giả. Không phụ thuộc vào code ví/swap cũ.
+**Mã nguồn riêng, chỉ chạy với tiền giả lập.** Bốn vault Solidity nạp/rút native trên **chính chain của vault** bằng STARK. Đây **không phải** mixer swap liên mạng: chưa có FHE ràng buộc vào quyền chi, chưa có settlement liên mạng, không có deployment công khai.
 
-| Tài sản native | Mạng | Chain ID | Đơn vị cơ sở |
-| --- | --- | ---: | --- |
-| ETH | Ethereum | `1` | `10^18` wei / ETH |
-| BNB | BNB Smart Chain | `56` | `10^18` / BNB |
-| TRX | TRON | `0x2b6653dc` (TVM Mainnet) | `10^6` sun / TRX |
-| HYPE | HyperEVM | `999` | `10^18` / HYPE |
+| Tài sản | Mạng (chain ID) | Đơn vị cơ sở | Điểm vào Solidity |
+| --- | --- | --- | --- |
+| ETH | Ethereum (`1`) | `10^18` wei/ETH | [`EthereumVault`](contracts/ethereum/EthereumVault.sol) |
+| BNB | BNB Smart Chain (`56`) | `10^18`/BNB | [`BscVault`](contracts/bsc/BscVault.sol) |
+| TRX | TRON TVM (`0x2b6653dc`) | `10^6` sun/TRX | [`TronVault`](contracts/tron/TronVault.sol) |
+| HYPE | HyperEVM (`999`) | `10^18`/HYPE | [`HyperEvmVault`](contracts/hyperevm/HyperEvmVault.sol) |
 
-Không có wrapper hoặc stablecoin. 12 chiều **định giá**, không phải 12 cầu thanh toán.
+Mỗi vault cố định chain ID, asset và verifier; dùng chung [`NativeVault`](contracts/vault/NativeVault.sol), không có admin, proxy hoặc đăng ký ERC-20. `deposit(ownerCommit)` ghi đúng `msg.value` vào note. `withdraw(proof, exit)` kiểm STARK Goldilocks/DEEP-FRI trực tiếp, chi đúng người nhận/phí mà proof chỉ định và khóa nullifier một lần. Bất kỳ relayer nào cũng gửi được proof; không cần chữ ký giao dịch rút từ chủ note. Tiền nạp/rút và địa chỉ nhận native vẫn thấy được trên chain.
 
 ## Chạy độc lập
 
@@ -17,34 +17,33 @@ Node.js 22+, trong thư mục này:
 
 ```sh
 npm ci --ignore-scripts
-npm run build
-npm test
-npm run demo
+npm run build && npm test && npm run demo
+npm run build:vault && npm run test:vault
 ```
 
-Demo deploy một oracle và bốn feed giả lập lên EVM **trong bộ nhớ**, tự gọi `refresh()` từ keeper khác deployer, rồi chạy 12 báo giá. Không dùng RPC hoặc ví bên ngoài. Chẳng hạn với ETH = 3.000 USD, BNB = 625 USD, HYPE ≈ 67,123456789 USD và phí giả lập 30 bps, `1 ETH` tương ứng `4,7856 BNB` hoặc `44,559683649816982014 HYPE`, trước phí mạng và giới hạn thanh khoản.
+`test:vault` dựng stack và nạp tiền trong EVM bộ nhớ, rồi gửi proof của chính các note đó từ tài khoản khác. Test còn cố sửa amount, recipient, phí, root và nullifier, đổi domain, thử verifier giả và thử replay sau khi rút. Xem [VAULTS.md](docs/VAULTS.md) cho cấu trúc proof, cách sinh vector mới và các giới hạn.
 
-Kiểm thêm trên Linux x86-64:
+Trên Linux x86-64, với compiler TVM **chính thức** đã pin checksum:
 
 ```sh
 bash scripts/fetch-tron-solc.sh /tmp/hcmtrail-native-tron-solc
-TRON_SOLC=/tmp/hcmtrail-native-tron-solc npm run build -- --tvm
-TRON_SOLC=/tmp/hcmtrail-native-tron-solc npm run test:tvm
-npm run test:fhe  # C/C++ compiler, curl, tar, patch, Linux getrandom; tải TFHE đã pin
+export TRON_SOLC=/tmp/hcmtrail-native-tron-solc
+npm run build -- --tvm
+npm run build:vault -- --tvm
+npm run test:tvm && npm run test:vault:tvm
+npm run test:fhe  # Linux getrandom, C/C++ compiler, curl, tar, patch; tải TFHE đã pin
 ```
 
-TVMJS kiểm thực thi bytecode biên dịch bằng compiler TRON. Đây không phải java-tron node, không kiểm TAPOS, phí Energy thực hay đồng thuận/finality. Bài kiểm STARK công khai của upstream có hướng dẫn riêng ở [REFERENCES.md](docs/REFERENCES.md).
+TVMJS thực thi bytecode của compiler TRON và chuyển số dư sun trong bộ nhớ. Đây không phải kiểm tra java-tron, TAPOS, phí Energy thực, finality hay giới hạn node công khai. Không có script gửi giao dịch lên RPC bên ngoài.
 
-`npm run bundle` tạo `dist/hcmtrail-native-source.tar.gz` bằng GNU tar. Giải nén vào một thư mục rỗng; gói chỉ gồm mã nguồn, test, lockfile và tài liệu của module này.
+`npm run bundle` tạo `dist/hcmtrail-native-source.tar.gz` bằng GNU tar. Giải nén vào thư mục rỗng để build và test mà không cần repo ví cũ.
 
-## Contract làm gì?
+## Oracle là module độc lập, không cấp quyền rút
 
-[`ChainlinkPriceEpochs.sol`](contracts/ChainlinkPriceEpochs.sol) gọi `decimals()` và `latestRoundData()` trên bốn proxy **cùng chain**. Policy chỉ đặt ở constructor, không admin/setter/proxy nâng cấp. `refresh()` nhận **không tham số**; ai cũng có thể tự động gửi giao dịch. Contract loại round sai/giá cũ/quá bounds/lệch timestamp, đóng khi sequencer không lành nếu cấu hình L2, và không cho lệnh chọn epoch lịch sử sau cập nhật. Không dùng giá cũ khi feed lỗi. Giá cập nhật cho epoch tương lai; không đổi rule hoặc núm phí của deployment.
+[`ChainlinkPriceEpochs.sol`](contracts/ChainlinkPriceEpochs.sol) đọc bốn proxy **cùng chain** bằng một contract. Policy đặt ở constructor, không admin/setter; keeper bất kỳ gọi `refresh()` không tham số. Oracle chặn round sai, feed cũ, giá ngoài biên, skew hoặc sequencer L2 lỗi. [`NativeAssets.sol`](contracts/NativeAssets.sol) đổi đơn vị và lấy floor một lần theo tỷ số giá. Demo dùng bốn feed giả, kiểm **12 chiều báo giá**, không phải 12 chiều chuyển tiền.
 
-[`NativeAssets.sol`](contracts/NativeAssets.sol) tính đúng một phép floor theo tỷ số hai giá USD18, đổi về đơn vị của **asset đích** và trừ fee bps cố định. Không nhận `tokenDecimals` do caller khai báo, không lẫn sun và wei, từ chối dust, số quá miền, cùng asset và `minOut` không đạt. Đây chỉ là số tham chiếu, không phải quyền rút. Đừng truyền số tiền riêng tư vào `quote()` kể cả thông qua RPC `eth_call`; ví đọc `activeEpoch()` công khai và tính cục bộ. `publishedEpoch()` có thể trả lịch sử đã hết hiệu lực.
+Ví đọc epoch công khai rồi tính riêng. Đừng gửi amount riêng vào `quote()` qua RPC. [`CHAINLINK.md`](docs/CHAINLINK.md) ghi nguồn, precision/heartbeat và candidate hub; chưa pin oracle triển khai công khai.
 
-- [CHAINLINK.md](docs/CHAINLINK.md): địa chỉ chuẩn/precision/heartbeat đã đối chiếu và lựa chọn hub. Chưa pin manifest chạy mainnet.
-- [SETTLEMENT.md](docs/SETTLEMENT.md): quan hệ ZK-STARK, dự trữ, giao thức chống chi hai lần và tiêu chí trước khi triển khai.
-- [REFERENCES.md](docs/REFERENCES.md): clone, pin và kiểm lab TFHE/STARK. Hai bài kiểm **chưa ghép** thành một proof của mixer. Code hợp đồng là Solidity; sinh proof, thực thi FHE và relayer phải chạy ngoài chain nếu muốn giữ witness riêng tư.
+[`REFERENCES.md`](docs/REFERENCES.md) ghi các mã đã clone, bài kiểm TFHE mã hóa và STARK tham chiếu. TFHE lab và vault STARK hiện **không liên kết với nhau**. [`SETTLEMENT.md`](docs/SETTLEMENT.md) liệt kê phần còn thiếu: chứng minh FHE gắn vào debit và epoch, giữ chỗ thanh khoản, kiểm finality và claim đích. Không thay những phần đó bằng chữ ký nhà vận hành.
 
-**Không chuyển tài sản vào contract.** Bản này không có payout, deposit, relayer sản xuất hay lối admin thu hồi tiền. Nếu native balance bị đẩy trực tiếp vào địa chỉ mà không thực thi contract, điều đó không cấp quyền rút. Không xóa nguồn cũ hay đổi deployment cho đến khi có bản thay thế đã được kiểm chứng.
+**Không đưa tiền thật vào.** Có thể mất tiền do lỗi prover/verifier, gửi sai note, nhận tiền bị revert hoặc vault không còn liveness. Chưa audit, chưa chứng nhận anonymity hoặc an toàn hậu lượng tử. Không xóa cây nguồn cũ khi bản mới chưa thay thế được nó.

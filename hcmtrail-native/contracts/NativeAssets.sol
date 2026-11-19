@@ -15,7 +15,7 @@ library NativeAssets {
     function chainId(NativeAsset asset) internal pure returns (uint256) {
         if (asset == NativeAsset.ETH) return 1;
         if (asset == NativeAsset.BNB) return 56;
-        if (asset == NativeAsset.TRX) return 0x2b6653dc; // TVM Mainnet CHAINID, not an EVM settlement lane.
+        if (asset == NativeAsset.TRX) return 0x2b6653dc; // TVM Mainnet CHAINID.
         return 999; // HyperEVM (not HyperCore).
     }
 

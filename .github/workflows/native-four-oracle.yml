@@ -1,4 +1,4 @@
-name: Four native assets oracle lab
+name: Four native assets oracle and vault lab
 
 on:
   push:
@@ -16,7 +16,7 @@ permissions:
 jobs:
   isolated-oracle:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
     defaults:
       run:
         working-directory: hcmtrail-native
@@ -32,9 +32,14 @@ jobs:
       - run: npm ci --ignore-scripts
       - run: npm audit --audit-level=moderate
       - run: npm run build && npm test
-      - name: Execute on TVM with pinned compiler
+      - name: Replay funded native STARK withdrawals on EVM
+        run: npm run build:vault && npm run test:vault
+      - name: Execute oracle and funded native STARK withdrawal on TVM
         run: |
           bash scripts/fetch-tron-solc.sh "$RUNNER_TEMP/tron-solc"
-          TRON_SOLC="$RUNNER_TEMP/tron-solc" npm run test:tvm
+          export TRON_SOLC="$RUNNER_TEMP/tron-solc"
+          npm run test:tvm
+          npm run build:vault -- --tvm
+          npm run test:vault:tvm
       - name: Execute encrypted TFHE math on laboratory vectors
         run: npm run test:fhe

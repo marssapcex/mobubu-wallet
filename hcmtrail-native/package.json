@@ -1,7 +1,7 @@
 {
   "name": "hcmtrail-native-oracle-lab",
   "version": "0.1.0",
-  "description": "Standalone four-native-asset pricing and private computation research; no custody or public deployment",
+  "description": "Four native custody vaults, Chainlink epochs and FHE experiments; no interchain settlement or public deployment",
   "private": true,
   "type": "module",
   "engines": {"node": ">=22.13.0"},
@@ -9,6 +9,9 @@
     "build": "node scripts/compile.mjs",
     "test": "node --test test/oracle.test.mjs",
     "test:tvm": "node --test test/oracle.tvm.test.mjs",
+    "build:vault": "node scripts/build-vault.mjs",
+    "test:vault": "node --test test/vault.test.mjs",
+    "test:vault:tvm": "node --test test/vault.tvm.test.mjs",
     "demo": "node scripts/local-demo.mjs",
     "test:fhe": "bash scripts/test-fhe.sh",
     "test:stark": "bash scripts/test-stark-reference.sh",

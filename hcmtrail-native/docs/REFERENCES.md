@@ -1,6 +1,6 @@
 # Các mã nguồn đã đối chiếu
 
-Giữ upstream ở ngoài cây ứng dụng. Không vendor thư viện, keys, proofs hoặc binary của bên thứ ba vào mã nguồn này.
+Giữ các checkout tham chiếu ngoài cây ứng dụng. Ngoại lệ: [một import closure MIT của verifier Solidity và ba evaluator code chunks](../contracts/vendor/nonos/NOTICE.md) cần để build bốn vault độc lập; không lưu toolchain, cache hoặc khóa thật. Các proof vector của vault được sinh riêng từ trạng thái mô phỏng.
 
 | Mã nguồn | Revision đã đọc | Áp dụng / không áp dụng |
 | --- | --- | --- |
@@ -8,7 +8,7 @@ Giữ upstream ở ngoài cây ứng dụng. Không vendor thư viện, keys, pr
 | [TFHE/CGGI](https://github.com/tfhe/tfhe) | [`9373b5d8a5b022ca5b4e112ae1c2440bc18e160c`](https://github.com/tfhe/tfhe/tree/9373b5d8a5b022ca5b4e112ae1c2440bc18e160c) | Build từ nguồn SHA-256 pin, thay RNG mặc định bằng Linux `getrandom`. Lab mã hóa debit 8 bit và `minOut` 9 bit, cloud key tính `floor(3×debit/2)` và cờ hợp lệ. Client độc lập về vai trò trong chương trình local kiểm kết quả sau giải mã. Đây là các cổng TFHE bootstrapped thật, không phải mạch production hoặc đánh giá an ninh tham số hậu lượng tử. |
 | [StarkEx contracts](https://github.com/starkware-libs/starkex-contracts) | [`f3b250690c5d927a6e398e9c1735d9193a643034`](https://github.com/starkware-libs/starkex-contracts/tree/f3b250690c5d927a6e398e9c1735d9193a643034) | `evm-verifier/solidity/contracts`: tham khảo cách tách Merkle/FRI/transcript và bind Cairo program. Không plug-in cho quan hệ hcmtrail. |
 | [Winterfell](https://github.com/facebook/winterfell) | [`2f78ee9bf667a561bdfcdfa68668d0f9b18b8315`](https://github.com/facebook/winterfell/tree/2f78ee9bf667a561bdfcdfa68668d0f9b18b8315) | README nói rõ witness có thể rò; không chọn cho private spend. |
-| [NØNOS/STARKs](https://github.com/NON-OS/STARKs) và [L1-Shield](https://github.com/NON-OS/L1-Shield) | [`a47d23ae969e23b5f841e30b49a1d483a80a6b02`](https://github.com/NON-OS/STARKs/tree/a47d23ae969e23b5f841e30b49a1d483a80a6b02) / [`9d17ad969812ed953143e5d832816a3e20dc7834`](https://github.com/NON-OS/L1-Shield/tree/9d17ad969812ed953143e5d832816a3e20dc7834) | Reference Goldilocks/DEEP-FRI kiểm trực tiếp bằng Solidity, không Groth16. Thử năm proof transfer/withdraw của upstream và các public input sửa. Chưa audit, chưa kiểm TVM hoặc relation đổi giá liên mạng. Xem `PARAMS.md`/`THREAT.md`: không lấy số conjectured hoặc kết quả replay làm chứng nhận hậu lượng tử. |
+| [NØNOS/STARKs](https://github.com/NON-OS/STARKs) và [L1-Shield](https://github.com/NON-OS/L1-Shield) | [`a47d23ae969e23b5f841e30b49a1d483a80a6b02`](https://github.com/NON-OS/STARKs/tree/a47d23ae969e23b5f841e30b49a1d483a80a6b02) / [`9d17ad969812ed953143e5d832816a3e20dc7834`](https://github.com/NON-OS/L1-Shield/tree/9d17ad969812ed953143e5d832816a3e20dc7834) | Reference Goldilocks/DEEP-FRI kiểm trực tiếp bằng Solidity, không Groth16. Ngoài năm proof upstream, [VAULTS.md](VAULTS.md) ghi riêng các vector nạp/rút của chính vault, với compiler EVM và TVM. Chưa audit độc lập và chưa có relation đổi giá liên mạng. Xem `PARAMS.md`/`THREAT.md`: không lấy số conjectured hoặc kết quả replay làm chứng nhận hậu lượng tử. |
 
 ## Lặp lại bài kiểm STARK upstream, không fork chain
 

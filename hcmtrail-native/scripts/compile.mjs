@@ -8,13 +8,12 @@ import solc from 'solc';
 const base = new URL('../', import.meta.url);
 const tronCompilerHash = '82605d2d64d9bcc2ab0b7608d192463de009a8ece6032058d4cbdbefbde87e78';
 
-export function compile({ tvm = false, fixtures = false } = {}) {
-  const paths = ['contracts/ChainlinkPriceEpochs.sol', 'contracts/NativeAssets.sol'];
-  if (fixtures) paths.push('test/fixtures/FeedFixture.sol');
+export function compileSolidity(paths, { tvm = false, settings = {} } = {}) {
   const input = JSON.stringify({ language: 'Solidity',
     sources: Object.fromEntries(paths.map((path) => [path, { content: readFileSync(new URL(path, base), 'utf8') }])),
     settings: { evmVersion: 'paris', optimizer: { enabled: true, runs: 200 },
-      outputSelection: { '*': { '*': ['abi', 'evm.bytecode.object', 'evm.deployedBytecode.object'] } } } });
+      outputSelection: { '*': { '*': ['abi', 'evm.bytecode.object', 'evm.deployedBytecode.object', 'evm.deployedBytecode.immutableReferences'] } },
+      ...settings } });
   let raw, compiler;
   if (tvm) {
     const bin = process.env.TRON_SOLC;
@@ -22,7 +21,7 @@ export function compile({ tvm = false, fixtures = false } = {}) {
       throw new Error('Set TRON_SOLC to the pinned official TRON Solidity compiler (see README).');
     }
     compiler = execFileSync(bin, ['--version'], { encoding: 'utf8', timeout: 5_000 }).trim().split('\n').at(-1);
-    raw = execFileSync(bin, ['--standard-json'], { input, encoding: 'utf8', timeout: 20_000, maxBuffer: 4 * 1024 * 1024 });
+    raw = execFileSync(bin, ['--standard-json'], { input, encoding: 'utf8', timeout: 90_000, maxBuffer: 8 * 1024 * 1024 });
   } else {
     compiler = solc.version();
     raw = solc.compile(input);
@@ -32,8 +31,16 @@ export function compile({ tvm = false, fixtures = false } = {}) {
   if (errors?.length) throw new Error(errors.map(({ formattedMessage }) => formattedMessage).join('\n'));
   const artifact = (path, name) => {
     const { abi, evm } = output.contracts[path][name];
-    return { compiler, abi, bytecode: `0x${evm.bytecode.object}`, runtimeTemplate: `0x${evm.deployedBytecode.object}` };
+    return { compiler, abi, bytecode: `0x${evm.bytecode.object}`, runtimeTemplate: `0x${evm.deployedBytecode.object}`,
+      immutableReferences: evm.deployedBytecode.immutableReferences ?? {} };
   };
+  return { artifact };
+}
+
+export function compile({ tvm = false, fixtures = false } = {}) {
+  const paths = ['contracts/ChainlinkPriceEpochs.sol', 'contracts/NativeAssets.sol'];
+  if (fixtures) paths.push('test/fixtures/FeedFixture.sol');
+  const { artifact } = compileSolidity(paths, { tvm });
   return {
     oracle: artifact(paths[0], 'ChainlinkPriceEpochs'),
     ...(fixtures ? { feed: artifact(paths[2], 'FeedFixture') } : {}),

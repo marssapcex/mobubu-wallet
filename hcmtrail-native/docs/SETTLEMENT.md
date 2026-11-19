@@ -1,6 +1,6 @@
 # Đặc tả trước khi nhận tiền: pool và swap riêng tư
 
-**Trạng thái:** đây là điều kiện nghiệm thu, không phải mô tả một mixer đã chạy. Không có vault/payable entrypoint, bridge, verifier hcmtrail, dịch vụ giải mã hay cấu hình triển khai công khai trong bản oracle lab.
+**Trạng thái:** đây là điều kiện nghiệm thu cho *swap liên mạng*, không phải mô tả một mixer đã chạy. [Bốn vault thử nghiệm](VAULTS.md) chỉ nạp/rút native nội mạng qua STARK. Chưa có proof của phép đổi giá hoặc FHE ràng buộc với note, dự trữ, bridge, dịch vụ giải mã hay cấu hình triển khai công khai.
 
 ## 1. Tách định giá, quyền chi, dự trữ và finality
 
