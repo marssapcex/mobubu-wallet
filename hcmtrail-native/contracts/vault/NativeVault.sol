@@ -50,19 +50,19 @@ abstract contract NativeVault is NativeStark, NativeNoteTree {
     error InsufficientBacking();
     error PayoutFailed();
 
-    constructor(NativeAsset asset_, address prepare, address walk, address[3] memory chunks)
+    constructor(NativeAsset asset_, uint256 chainId_, address prepare, address walk, address[3] memory chunks)
         NativeStark(asset_ == NativeAsset.TRX, prepare, walk, chunks)
-        NativeNoteTree(_domain(asset_))
+        NativeNoteTree(_domain(asset_, chainId_))
     {
         asset = asset_;
-        homeChainId = NativeAssets.chainId(asset_);
+        homeChainId = chainId_;
         unitsPerCoin = NativeAssets.units(asset_);
         // Base units, not the wider integer envelope of the separate pricing contracts.
         custodyCap = asset_ == NativeAsset.TRX ? uint64(type(int64).max) : Goldilocks.MAX_VALUE;
     }
 
-    function _domain(NativeAsset a) private view returns (bytes32) {
-        if (block.chainid != NativeAssets.chainId(a)) revert WrongChain();
+    function _domain(NativeAsset a, uint256 chainId_) private view returns (bytes32) {
+        if (block.chainid != chainId_) revert WrongChain();
         return keccak256(abi.encode("HCMTRAIL-NATIVE-LOCAL-EXIT-v1", block.chainid, address(this), a, STARK_IMAGE));
     }
 

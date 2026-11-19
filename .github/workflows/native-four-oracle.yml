@@ -43,6 +43,12 @@ jobs:
           npm run test:tvm
           npm run build:vault -- --tvm
           npm run test:vault:tvm
+      - name: Check four testnet domains, local signing and confirmed note recovery
+        run: |
+          export TRON_SOLC="$RUNNER_TEMP/tron-solc"
+          npm run build:testnet
+          npm run build:testnet -- --tvm
+          npm run test:testnet
       - name: Execute encrypted TFHE math on laboratory vectors
         run: npm run test:fhe
       - name: Evaluate Solidity quote traces with bootstrapped TFHE and fixture callbacks

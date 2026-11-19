@@ -1,6 +1,6 @@
 # Bốn vault native: nạp → note → STARK → rút local
 
-Một vault chỉ để thử với bộ mô phỏng của chain của nó. Không có tài sản bọc, nguồn mint, bridge, đường rút khẩn cấp hoặc quyền sửa verifier. **Không deploy với tiền thật.**
+Các wrapper mainnet trong tài liệu này là fixture hồi quy. Để thử bằng coin faucet dùng bốn wrapper testnet và [runbook deploy/nạp/rút](TESTNET.md); không dùng mainnet. Không có tài sản bọc, nguồn mint, bridge, đường rút khẩn cấp hoặc quyền sửa verifier. **Không deploy với tiền thật.**
 
 ## Ranh giới thực thi
 

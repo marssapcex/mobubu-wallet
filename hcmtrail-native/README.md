@@ -1,6 +1,10 @@
 # hcmtrail native · Vault STARK, oracle và báo giá FHE
 
-**Mã nguồn riêng, chỉ thử với dữ liệu và tiền giả lập.** Bốn vault Solidity nạp/rút native trên **chính chain của vault** bằng STARK. [`ZamaNativeQuotes`](contracts/fhe/ZamaNativeQuotes.sol) làm báo giá mã hóa bằng FHE trực tiếp trong Solidity. Hai luồng vẫn tách biệt: chưa có FHE ràng buộc vào quyền chi, chưa có settlement liên mạng, chưa deploy công khai.
+**Chỉ dùng coin testnet; chưa audit, không dùng mainnet.** Bốn vault Solidity nạp/rút native trên **chính chain của vault** bằng STARK. Bắt đầu ở [runbook testnet](docs/TESTNET.md): deploy Sepolia/BSC testnet/Nile/HyperEVM testnet, lưu note cục bộ, nạp có biên nhận, tạo STARK thật và rút/khôi phục change. [Kết quả kiểm tra](docs/TESTNET-RESULTS.md) phân biệt emulator với cổng live chưa chạy. Không có deployment công khai kèm theo.
+
+[`ZamaNativeQuotes`](contracts/fhe/ZamaNativeQuotes.sol) là nghiên cứu báo giá mã hóa riêng. FHE và oracle **không** nằm trên đường tiền của vault; chưa có settlement liên mạng.
+
+Các wrapper dùng chain ID mainnet dưới đây **chỉ giữ để hồi quy emulator**, không có lệnh deploy bằng CLI testnet:
 
 | Tài sản | Mạng (chain ID) | Đơn vị cơ sở | Điểm vào Solidity |
 | --- | --- | --- | --- |
@@ -36,7 +40,7 @@ npm run test:fhe        # Linux getrandom, C/C++ compiler, curl, tar, patch; t�
 npm run test:fhe:trace  # replay trace Solidity với TFHE thật, KMS/host fixture
 ```
 
-TVMJS thực thi bytecode của compiler TRON và chuyển số dư sun trong bộ nhớ. Đây không phải kiểm tra java-tron, TAPOS, phí Energy thực, finality hay giới hạn node công khai. Không có script gửi giao dịch lên RPC bên ngoài.
+TVMJS thực thi bytecode của compiler TRON và chuyển số dư sun trong bộ nhớ. Bộ test [testnet](docs/TESTNET.md) còn dựng và ký protobuf/TAPOS cục bộ nhưng **không** thay cho kiểm tra java-tron, phí Energy thật, finality hay giới hạn node công khai. Chỉ CLI `npm run testnet` do người dùng chủ động cấu hình signer/RPC mới gửi giao dịch công khai; các test không gửi.
 
 `npm run bundle` tạo `dist/hcmtrail-native-source.tar.gz` bằng GNU tar. Giải nén vào thư mục rỗng để build và test mà không cần repo ví cũ.
 

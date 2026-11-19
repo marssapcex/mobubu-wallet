@@ -17,9 +17,9 @@ export const ensureSuccess = ({ execResult }) => {
   return execResult;
 };
 
-export async function localTvm({ chainId = TRON_ID, now = TVM_NOW } = {}) {
+export async function localTvm({ chainId = TRON_ID, now = TVM_NOW, funded = [TVM_DEPOSITOR, TVM_RELAYER] } = {}) {
   const tvm = await createTVM({ common: createCustomCommon({ name: 'hcmtrail-local-vault', chainId: Number(chainId) }, TronMainnet) });
-  for (const a of [TVM_DEPOSITOR, TVM_RELAYER]) {
+  for (const a of funded) {
     await tvm.stateManager.putAccount(address(a), new Account(0n, 100_000_000n));
   }
   const run = ({ from = TVM_DEPOSITOR, timestamp = now, ...opts }) => tvm.runCall({
@@ -46,7 +46,12 @@ export async function localTvm({ chainId = TRON_ID, now = TVM_NOW } = {}) {
       const deployment = ensureSuccess(raw);
       return { ...attach(abi, raw.createdAddress.toString()), deployment };
     },
-    attach, deployRaw,
+    attach, deployRaw, run,
+    code: async (at) => hexlify(await tvm.stateManager.getCode(address(at))),
+    async simulate(opts) {
+      await tvm.stateManager.checkpoint();
+      try { return await run(opts); } finally { await tvm.stateManager.revert(); }
+    },
     balance: async (at) => (await tvm.stateManager.getAccount(address(at)))?.balance ?? 0n,
   };
 }

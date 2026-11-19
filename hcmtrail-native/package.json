@@ -20,7 +20,11 @@
     "bundle": "bash scripts/bundle-source.sh",
     "build:fhe": "node scripts/build-fhe.mjs",
     "test:fhe:evm": "node --test test/zama-quote.test.mjs",
-    "test:fhe:trace": "bash scripts/test-fhe.sh --trace"
+    "test:fhe:trace": "bash scripts/test-fhe.sh --trace",
+    "testnet": "node scripts/testnet.mjs",
+    "build:testnet": "node scripts/build-vault.mjs --testnet",
+    "test:testnet": "node --test --test-concurrency=1 test/testnet.test.mjs",
+    "test:testnet:fresh": "node --test --test-concurrency=1 test/testnet-fresh.test.mjs"
   },
   "devDependencies": {
     "@fhevm/solidity": "0.13.4",
@@ -29,9 +33,13 @@
     "@tvmjs/tvm": "1.2.0",
     "@tvmjs/util": "1.2.0",
     "ethers": "6.17.0",
-    "solc": "0.8.24"
+    "solc": "0.8.24",
+    "tronweb": "6.5.1"
   },
   "overrides": {
-    "tmp": "0.2.7"
+    "tmp": "0.2.7",
+    "tronweb": {
+      "axios": "1.20.0"
+    }
   }
 }
