@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { copyFileSync, existsSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { hexlify, id, toQuantity, ZeroAddress } from 'ethers';
+import { getBytes, hexlify, id, toQuantity, ZeroAddress } from 'ethers';
 import { test } from 'node:test';
 import { daoFee, HCMT_RELAY_BOND, relayLimits } from '../testnet/dao-policy.mjs';
 import { TESTNETS } from '../testnet/networks.mjs';
@@ -74,7 +74,7 @@ for (const asset of assets) test(`${asset} HCMT: real bonded withdrawal with DAO
     };
     const spec = wallet.ledger.spec('withdraw', [e.proof, e.exit]);
     if (chain.network.tvm) {
-      const raw = await f.vm.attach(f.a.vaults[asset].abi, m.vault).raw(spec.data, {
+      const raw = await f.vm.attach(f.a.vaults[asset].abi, m.vault).raw(getBytes(spec.data), {
         from: relayChain.sender, timestamp: (await chain.head()).timestamp,
       });
       assert(raw.execResult.exceptionError);
