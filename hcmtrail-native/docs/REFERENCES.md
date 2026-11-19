@@ -1,0 +1,25 @@
+# Các mã nguồn đã đối chiếu
+
+Giữ upstream ở ngoài cây ứng dụng. Không vendor thư viện, keys, proofs hoặc binary của bên thứ ba vào mã nguồn này.
+
+| Mã nguồn | Revision đã đọc | Áp dụng / không áp dụng |
+| --- | --- | --- |
+| [FHEVM](https://github.com/zama-ai/fhevm) | [`a90b5dfc56155f334c4ceb0e0cbec14ee195d60c`](https://github.com/zama-ai/fhevm/tree/a90b5dfc56155f334c4ceb0e0cbec14ee195d60c) | `library-solidity/config/ZamaConfig.sol`, `README.md`: Solidity gọi host contracts; FHE thực thi ở coprocessor/KMS ngoài chain. Không xác nhận triển khai hỗ trợ đủ bốn mạng; nhánh BSC ở checkout là BSC Testnet, không mặc định có host trên TRON/HyperEVM. |
+| [TFHE/CGGI](https://github.com/tfhe/tfhe) | [`9373b5d8a5b022ca5b4e112ae1c2440bc18e160c`](https://github.com/tfhe/tfhe/tree/9373b5d8a5b022ca5b4e112ae1c2440bc18e160c) | Build từ nguồn SHA-256 pin, thay RNG mặc định bằng Linux `getrandom`. Lab mã hóa debit 8 bit và `minOut` 9 bit, cloud key tính `floor(3×debit/2)` và cờ hợp lệ. Client độc lập về vai trò trong chương trình local kiểm kết quả sau giải mã. Đây là các cổng TFHE bootstrapped thật, không phải mạch production hoặc đánh giá an ninh tham số hậu lượng tử. |
+| [StarkEx contracts](https://github.com/starkware-libs/starkex-contracts) | [`f3b250690c5d927a6e398e9c1735d9193a643034`](https://github.com/starkware-libs/starkex-contracts/tree/f3b250690c5d927a6e398e9c1735d9193a643034) | `evm-verifier/solidity/contracts`: tham khảo cách tách Merkle/FRI/transcript và bind Cairo program. Không plug-in cho quan hệ hcmtrail. |
+| [Winterfell](https://github.com/facebook/winterfell) | [`2f78ee9bf667a561bdfcdfa68668d0f9b18b8315`](https://github.com/facebook/winterfell/tree/2f78ee9bf667a561bdfcdfa68668d0f9b18b8315) | README nói rõ witness có thể rò; không chọn cho private spend. |
+| [NØNOS/STARKs](https://github.com/NON-OS/STARKs) và [L1-Shield](https://github.com/NON-OS/L1-Shield) | [`a47d23ae969e23b5f841e30b49a1d483a80a6b02`](https://github.com/NON-OS/STARKs/tree/a47d23ae969e23b5f841e30b49a1d483a80a6b02) / [`9d17ad969812ed953143e5d832816a3e20dc7834`](https://github.com/NON-OS/L1-Shield/tree/9d17ad969812ed953143e5d832816a3e20dc7834) | Reference Goldilocks/DEEP-FRI kiểm trực tiếp bằng Solidity, không Groth16. Thử năm proof transfer/withdraw của upstream và các public input sửa. Chưa audit, chưa kiểm TVM hoặc relation đổi giá liên mạng. Xem `PARAMS.md`/`THREAT.md`: không lấy số conjectured hoặc kết quả replay làm chứng nhận hậu lượng tử. |
+
+## Lặp lại bài kiểm STARK upstream, không fork chain
+
+Dùng Linux x86-64, Foundry `forge` 1.4.4, `solc` EVM **native** 0.8.24 (`e11b9ed9`, SHA-256 `fb03a29a517452b9f12bcf459ef37d0a543765bb3bbc911e70a87d6a37c30d5f`). Binary chính thức có trong [solc-bin](https://github.com/ethereum/solc-bin/tree/gh-pages/linux-amd64); không dùng compiler TRON ở bước này.
+
+```sh
+refs=$(mktemp -d)
+git clone https://github.com/NON-OS/L1-Shield.git "$refs/l1-shield"
+git -C "$refs/l1-shield" checkout --detach 9d17ad969812ed953143e5d832816a3e20dc7834
+git -C "$refs/l1-shield" submodule update --init --recursive --depth 1
+STARK_REFERENCE="$refs/l1-shield" SOLC_EVM=/path/to/solc npm run test:stark
+```
+
+Lệnh trên chỉ chạy `NotBeforeVerifierTest` trong checkout độc lập với FFI bị tắt, không cần RPC/khóa. Kiểm cả pin program/width; năm biến thể proof thật được chấp nhận và từ chối cùng proof khi đổi mốc `notBefore` hoặc cắt public statement. Gas suite in ra là tổng theo mỗi test chứa cả case đúng và sai, **không phải báo giá gas một giao dịch payout**. Bài kiểm không chứng minh quan hệ đổi giá/hợp đồng hcmtrail, không kiểm độ ẩn danh thực tế và không xác nhận giới hạn mainnet.

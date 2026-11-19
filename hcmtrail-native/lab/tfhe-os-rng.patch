@@ -1,0 +1,18 @@
+--- a/src/include/numeric_functions.h
++++ b/src/include/numeric_functions.h
+@@ -11 +11,2 @@
+-extern std::default_random_engine generator;
++#include "os_rng.hpp"
++extern LabOsRandom generator;
+--- a/src/libtfhe/numeric-functions.cpp
++++ b/src/libtfhe/numeric-functions.cpp
+@@ -11 +11 @@
+-default_random_engine generator;
++LabOsRandom generator;
+@@ -16,4 +16,3 @@
+-EXPORT void tfhe_random_generator_setSeed(uint32_t* values, int32_t size) {
+-    seed_seq seeds(values, values+size);
+-    generator.seed(seeds);
++EXPORT void tfhe_random_generator_setSeed(uint32_t*, int32_t) {
++    std::abort(); // This build never accepts externally supplied RNG seeds.
+ }
