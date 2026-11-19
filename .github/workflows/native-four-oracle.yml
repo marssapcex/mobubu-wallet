@@ -49,6 +49,12 @@ jobs:
           npm run build:testnet
           npm run build:testnet -- --tvm
           npm run test:testnet
+      - name: Build four HCMT fee vaults and exercise monthly accounting and relay guards
+        run: |
+          export TRON_SOLC="$RUNNER_TEMP/tron-solc"
+          npm run build:dao
+          npm run build:dao -- --tvm
+          npm run test:dao
       - name: Execute encrypted TFHE math on laboratory vectors
         run: npm run test:fhe
       - name: Evaluate Solidity quote traces with bootstrapped TFHE and fixture callbacks

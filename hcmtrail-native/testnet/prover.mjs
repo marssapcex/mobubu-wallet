@@ -3,7 +3,7 @@ import { createHash } from 'node:crypto';
 import { readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { promisify } from 'node:util';
-import { getAddress, hexlify, toBeHex, ZeroAddress, ZeroHash } from 'ethers';
+import { getAddress, hexlify, toBeHex, ZeroHash } from 'ethers';
 import { GOLDILOCKS, STARK_PARAMS } from './networks.mjs';
 import { limbs4, openNote, pack, unpack, uint, word256 } from './notes.mjs';
 import { need, OperatorError, privateText } from './store.mjs';
@@ -55,7 +55,7 @@ export function publicExit(words, request) {
   const exit = { root: digest(0), nullifiers: [digest(8), digest(12)], change: [digest(16), digest(20)], recipient: to(28),
     feeRecipient: to(32), amount: w[24], fee: w[25], notBefore: w[36] };
   need(exit.root === request.note_root && digest(4) === request.note_root && exit.recipient === request.recipient &&
-    exit.feeRecipient === ZeroAddress && exit.amount === request.public_amount && exit.fee === 0n &&
+    exit.feeRecipient === request.fee_recipient && exit.amount === request.public_amount && exit.fee === request.fee &&
     w[26] === request.asset_id && w[27] === 0n && exit.notBefore === request.not_before, 'Proof publics do not match the requested deployment-bound exit.');
   need(exit.nullifiers[0] !== exit.nullifiers[1] && [...exit.nullifiers, ...exit.change].every((n) => n !== ZeroHash), 'Invalid proof nullifier or change commitment.');
   return exit;

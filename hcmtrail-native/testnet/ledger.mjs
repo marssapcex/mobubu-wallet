@@ -1,4 +1,5 @@
 import { Interface, ZeroHash } from 'ethers';
+import { daoFee } from './dao-policy.mjs';
 import { callSpec, view } from './deployment.mjs';
 import { rebuildRoot, unpack, uint } from './notes.mjs';
 import { need } from './store.mjs';
@@ -89,7 +90,17 @@ export class Ledger {
     return { head, root: anchor.root, leaves, rows };
   }
 
+  checkDaoFee(receipt, withdrawal, gross) {
+    if (!this.m.dao) return 0n;
+    const fee = daoFee(gross);
+    need(this.events(receipt, 'DaoFeePaid').some(([isExit, value, paid]) => isExit === withdrawal && value === gross && paid === fee),
+      'Receipt is missing the matching DAO fee.');
+    return fee;
+  }
+
   depositIn(receipt, note) {
+    const gross = note.source?.gross ?? note.value;
+    need(gross - this.checkDaoFee(receipt, false, gross) === note.value, 'Net deposit amount disagrees with the note opening.');
     const deposits = this.events(receipt, DEPOSIT).filter(([, leaf, value]) => leaf === note.leaf && value === note.value);
     need(deposits.length === 1, 'Receipt does not contain exactly one matching vault deposit.');
     const index = deposits[0][0];
@@ -100,9 +111,11 @@ export class Ledger {
   }
 
   exitIn(receipt, exit) {
+    const net = BigInt(exit.amount) - this.checkDaoFee(receipt, true, BigInt(exit.amount));
     const paid = this.events(receipt, WITHDRAW).filter(([n0, n1, recipient, amount, feeRecipient, fee]) =>
       n0 === exit.nullifiers[0] && n1 === exit.nullifiers[1] && recipient === exit.recipient &&
-      amount === BigInt(exit.amount) && feeRecipient === exit.feeRecipient && fee === BigInt(exit.fee));
+      amount === net && feeRecipient === exit.feeRecipient && fee === BigInt(exit.fee));
+    // The pinned vault checks msg.sender. A smart-contract broadcaster need not be the outer tx sender.
     need(paid.length === 1, 'Receipt does not contain exactly one matching vault payout.');
     const leaves = this.events(receipt, LEAF);
     const pair = leaves.filter(([index, hash], i) => hash === exit.change[0] &&

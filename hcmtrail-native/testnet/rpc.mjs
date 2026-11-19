@@ -116,8 +116,13 @@ export class EvmChain {
 
   code(at) { return this.rpc('eth_getCode', [at, 'latest']).then(hex); }
   balance(at) { return this.rpc('eth_getBalance', [at, 'latest']).then(quantity); }
-  call({ to, data }, at = 'latest') {
-    return this.rpc('eth_call', [{ to, data }, typeof at === 'bigint' ? q(at) : at]).then(hex);
+  async creationData(hash) {
+    const tx = await this.rpc('eth_getTransactionByHash', [txId(hash)]);
+    need(tx && tx.to == null && same(tx.hash, hash), 'Missing EVM creation transaction.');
+    return hex(tx.input);
+  }
+  call({ to, data, from = this.sender }, at = 'latest') {
+    return this.rpc('eth_call', [{ to, data, ...(from ? { from } : {}) }, typeof at === 'bigint' ? q(at) : at]).then(hex);
   }
 
   async logs(at, topics, from, to) {
@@ -161,8 +166,9 @@ export class EvmChain {
     return { gasEstimate, gasLimit, gasPrice };
   }
 
-  async prepare(spec) {
+  async prepare(spec, acceptBudget) {
     const budget = await this.simulate(spec);
+    acceptBudget?.(budget);
     // HyperEVM does not expose pending state on the reference RPC. Use a dedicated single-process signer.
     const nonce = quantity(await this.rpc('eth_getTransactionCount', [this.sender, this.network.bigBlocks ? 'latest' : 'pending']));
     await this.checkChain();
@@ -208,6 +214,12 @@ export class NileChain extends EvmChain {
   }
 
   head() { return this.nativeBlock(true); }
+  async creationData(hash) {
+    const tx = await this.native('walletsolidity/gettransactionbyid', { value: txId(hash).slice(2) });
+    const entry = tx?.raw_data?.contract?.[0];
+    need(tx && same(hex(tx.txID), hash) && entry?.type === 'CreateSmartContract', 'Missing Nile creation transaction.');
+    return hex(entry.parameter.value.new_contract.bytecode);
+  }
 
   async constant(spec, solid = true) {
     const value = spec.value ?? 0n;
@@ -270,8 +282,9 @@ export class NileChain extends EvmChain {
     return { feeLimitSun: this.feeLimit, energyEstimate, sunPerEnergy, estimatedBurnSun };
   }
 
-  async prepare(spec) {
+  async prepare(spec, acceptBudget) {
     const budget = await this.simulate(spec);
+    acceptBudget?.(budget);
     const head = await this.nativeBlock(false);
     const blockHeader = { ref_block_bytes: q(head.number).slice(2).slice(-4).padStart(4, '0'),
       ref_block_hash: head.hash.slice(18, 34), timestamp: Number(head.millis), expiration: Number(head.millis + 300_000n) };

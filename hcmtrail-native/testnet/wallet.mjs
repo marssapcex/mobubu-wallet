@@ -1,11 +1,13 @@
-import { ZeroAddress, ZeroHash } from 'ethers';
+import { ZeroAddress } from 'ethers';
+import { daoFee } from './dao-policy.mjs';
+import { exitContext, exitTerms, inContext, localAmount, payoutAddress } from './exit-terms.mjs';
+import { activeBroadcaster, validateQuote } from './relay.mjs';
 import { receiptSummary } from './deployment.mjs';
 import { Ledger } from './ledger.mjs';
-import { custodyCap, noteNullifier, openNote, seedEntry, uint, unpack, word256 } from './notes.mjs';
+import { noteNullifier, openNote, seedEntry, word256 } from './notes.mjs';
 import { proofHash, proofShape, proveLocal } from './prover.mjs';
-import { address, txId } from './rpc.mjs';
+import { txId } from './rpc.mjs';
 import { need } from './store.mjs';
-import { GOLDILOCKS } from './networks.mjs';
 
 const noteFile = (leaf) => `note-${word256(leaf)}.json`;
 const fundFile = (leaf) => `fund-${word256(leaf)}.json`;
@@ -20,12 +22,13 @@ export class TestnetWallet {
     this.store = store;
     this.txs = txs;
     this.ledger = new Ledger(chain, manifest, abi);
-    this.context = { schema: 1, asset: this.net.asset, chainId: manifest.chainId, vault: manifest.vault, domain: manifest.domain };
+    this.manifest = manifest;
+    this.context = exitContext(this.net, manifest);
     this.domainLeaf = manifest.domainLeaf;
   }
 
   checkContext(stored) {
-    need(stored && Object.entries(this.context).every(([k, v]) => stored[k] === v), 'Local artifact belongs to another deployment.');
+    need(inContext(this.context, stored), 'Local artifact belongs to another deployment.');
   }
 
   keep(note, source) {
@@ -35,15 +38,14 @@ export class TestnetWallet {
     return note.leaf;
   }
 
-  amount(value) {
-    const amount = uint(value, custodyCap(this.net), 'base-unit amount');
-    need(amount > 0n && (!this.net.tvm || amount <= BigInt(Number.MAX_SAFE_INTEGER)), 'Use a positive testnet-sized amount in native base units.');
-    return amount;
-  }
+  amount(value) { return localAmount(this.net, value); }
 
   newNote(value) {
-    const n = openNote(this.net, this.amount(value));
-    return { note: this.keep(n, { kind: 'deposit' }), amount: n.value, ownerCommit: n.ownerCommit };
+    const gross = this.amount(value);
+    const fee = this.manifest.dao ? daoFee(gross) : 0n;
+    const n = openNote(this.net, gross - fee);
+    const note = this.keep(n, { kind: 'deposit', ...(this.manifest.dao ? { gross } : {}) });
+    return { note, amount: n.value, ownerCommit: n.ownerCommit, ...(this.manifest.dao ? { gross, daoFee: fee } : {}) };
   }
 
   note(id) {
@@ -53,6 +55,11 @@ export class TestnetWallet {
     need(source?.kind === 'deposit' || source?.kind === 'change', 'Unknown local note source.');
     const n = openNote(this.net, this.amount(stored.value), stored.secret, stored.blinding);
     need(n.leaf === word256(id) && stored.leaf === n.leaf && n.leaf !== this.domainLeaf, 'Note opening does not derive the saved commitment.');
+    if (source.kind === 'deposit' && this.manifest.dao) {
+      const gross = this.amount(source.gross);
+      need(n.value === gross - daoFee(gross), 'Saved gross deposit does not match its net note opening.');
+      source.gross = gross;
+    }
     return { ...n, source };
   }
 
@@ -110,38 +117,22 @@ export class TestnetWallet {
       need(await this.ledger.read('commitment', [note.value, note.ownerCommit]) === note.leaf,
         'Vault commitment does not match the locally generated opening.');
     }
-    const receipt = await this.txs.submit(label, this.ledger.spec('deposit', [note.ownerCommit], note.value));
+    const receipt = await this.txs.submit(label, this.ledger.spec('deposit', [note.ownerCommit], note.source.gross ?? note.value));
     return this.recordFunding(note, receipt);
   }
 
-  recipient(text) {
-    const to = address(this.net, text);
-    need(to !== ZeroAddress && to !== this.context.vault, 'Payout must target a nonzero address outside the vault.');
-    return to;
-  }
+  exitTerms(terms) { return exitTerms(this.net, this.manifest, terms); }
 
-  exitTerms(terms) {
-    const root = word256(terms.root);
-    const pair = (v) => {
-      need(Array.isArray(v) && v.length === 2, 'Expected two public digest words.');
-      return v.map((word) => { const w = word256(word); unpack(w); need(w !== ZeroHash, 'Zero public digest.'); return w; });
-    };
-    const nullifiers = pair(terms.nullifiers), change = pair(terms.change);
-    const amount = this.amount(terms.amount);
-    const notBefore = uint(terms.notBefore, GOLDILOCKS - 1n, 'NotBefore');
-    const fee = uint(terms.fee, 0n, 'self-submit fee');
-    unpack(root);
-    need(root !== ZeroHash && nullifiers[0] !== nullifiers[1] && !change.includes(this.domainLeaf) &&
-      address(this.net, terms.feeRecipient) === ZeroAddress && notBefore > 0n && notBefore % 600n === 0n,
-    'Public exit is not a valid zero-fee local withdrawal.');
-    return { root, nullifiers, change, recipient: this.recipient(terms.recipient), feeRecipient: ZeroAddress, amount, fee, notBefore };
-  }
-
-  async prove(id, payout, recipient, prover) {
+  async prove(id, payout, recipient, prover, quote) {
     const note = this.note(id);
     const amount = this.amount(payout);
-    const to = this.recipient(recipient);
-    need(amount <= note.value, 'Requested payout exceeds the input note value.');
+    const to = payoutAddress(this.net, this.manifest, recipient);
+    const relay = quote === undefined ? { fee: 0n, feeRecipient: ZeroAddress } : validateQuote(this.net, this.manifest, quote);
+    const debit = amount + relay.fee;
+    need(debit <= note.value, 'Gross payout plus broadcaster fee exceeds the input note value.');
+    if (relay.fee !== 0n) {
+      need(await activeBroadcaster(this.chain, this.manifest, relay.feeRecipient), 'Broadcaster does not hold 100 active staked HCMT.');
+    }
     const fund = await this.recoverNote(id);
     const snapshot = await this.ledger.snapshot();
     const row = snapshot.rows[Number(fund.index)];
@@ -155,8 +146,8 @@ export class TestnetWallet {
     const request = {
       asset_id: this.net.assetId, note_root: snapshot.root, assoc_root: snapshot.root,
       pool_leaves: snapshot.leaves, assoc_leaves: snapshot.leaves, input_pool_index: [fund.index, 0n], input_assoc_index: [fund.index, 0n],
-      recipient: to, fee_recipient: ZeroAddress, clearing_price: 0n, not_before: notBefore,
-      public_amount: amount, fee: 0n, output_values: [note.value - amount, 0n], self_submit: true, any_amount: true,
+      recipient: to, fee_recipient: relay.feeRecipient, clearing_price: 0n, not_before: notBefore,
+      public_amount: amount, fee: relay.fee, output_values: [note.value - debit, 0n], self_submit: relay.fee === 0n, any_amount: true,
     };
     const seed = { secrets: [note.secret, dummy.secret], notes: [seedEntry(note, this.net), seedEntry(dummy, this.net)] };
     const result = await proveLocal(this.store, this.net, prover, request, seed, nf, this.txs.report);
@@ -166,7 +157,9 @@ export class TestnetWallet {
     // The opening has been fsynced before releasing *any* public proof which could be relayed.
     this.store.write(planFile(hash), { ...this.context, input: note.leaf, inputIndex: fund.index, changeNote });
     this.store.write(exitFile(hash), { ...this.context, id: hash, proof: result.proof, exit, proofBytes: result.proofBytes, prover: result.build });
-    return { exitId: hash, publicFile: exitFile(hash), changeNote, payout: amount, recipient: to,
+    const levy = this.manifest.dao ? daoFee(amount) : 0n;
+    return { exitId: hash, publicFile: exitFile(hash), changeNote, payout: amount - levy, recipient: to,
+      ...(this.manifest.dao ? { gross: amount, daoFee: levy, broadcasterFee: relay.fee, feeRecipient: relay.feeRecipient, debit } : {}),
       proofBytes: result.proofBytes, proofSeconds: result.proofSeconds, root: exit.root };
   }
 
@@ -181,9 +174,10 @@ export class TestnetWallet {
     const p = this.store.read(planFile(e.id));
     this.checkContext(p);
     const note = this.note(p.input);
-    need(noteNullifier(note, p.inputIndex) === e.exit.nullifiers[0] && note.value >= e.exit.amount,
+    const debit = e.exit.amount + e.exit.fee;
+    need(noteNullifier(note, p.inputIndex) === e.exit.nullifiers[0] && note.value >= debit,
       'Saved note and position do not match the exit.');
-    const remaining = note.value - e.exit.amount;
+    const remaining = note.value - debit;
     if (remaining === 0n) need(p.changeNote === null, 'Unexpected local change opening.');
     else {
       const change = this.note(p.changeNote);
@@ -193,9 +187,17 @@ export class TestnetWallet {
     return p;
   }
 
+  exportRelay(id) {
+    const e = this.loadExit(id);
+    this.checkedPlan(e);
+    need(e.exit.fee > 0n, 'This exit was not prepared for a paid broadcaster.');
+    return { ...this.context, ...e };
+  }
+
   async preflight(id) {
     const e = this.loadExit(id);
     this.checkedPlan(e);
+    need(e.exit.fee === 0n, 'Use relay-export and have the quoted broadcaster run relay-check for a paid exit.');
     for (const nf of e.exit.nullifiers) need(!await this.ledger.read('spent', [nf]), 'AlreadySpent: this proof must not be submitted again.');
     need(await this.ledger.read('knownRoot', [e.exit.root]), 'UnknownRoot: proof does not belong to this vault tree.');
     const spec = this.ledger.spec('withdraw', [e.proof, e.exit]);
@@ -207,7 +209,9 @@ export class TestnetWallet {
     for (const nf of e.exit.nullifiers) need(await this.ledger.read('spent', [nf]), 'Confirmed receipt did not retire both nullifiers.');
     const p = this.checkedPlan(e);
     if (p.changeNote) await this.recordFunding(this.note(p.changeNote), receipt);
-    const result = { exitId: e.id, recipient: e.exit.recipient, amount: e.exit.amount, changeNote: p.changeNote,
+    const levy = this.manifest.dao ? daoFee(e.exit.amount) : 0n;
+    const result = { exitId: e.id, recipient: e.exit.recipient, amount: e.exit.amount - levy, changeNote: p.changeNote,
+      ...(this.manifest.dao ? { gross: e.exit.amount, daoFee: levy, broadcasterFee: e.exit.fee, feeRecipient: e.exit.feeRecipient } : {}),
       appendedAt: index, receipt: receiptSummary(receipt) };
     this.store.write(paidFile(e.id), result);
     return result;
@@ -224,6 +228,7 @@ export class TestnetWallet {
     const e = this.loadExit(id);
     this.checkedPlan(e);
     if (this.store.has(paidFile(id))) return this.recoverExit(id);
+    need(e.exit.fee === 0n, 'This exit must be sent by the quoted broadcaster, or recovered after confirmation.');
     if (!this.txs.existing(`withdraw-${e.id}`)) {
       const used = await Promise.all(e.exit.nullifiers.map((nf) => this.ledger.read('spent', [nf])));
       need(!used.some(Boolean), 'AlreadySpent: no new transaction. Use recover-exit if this proof was relayed.');

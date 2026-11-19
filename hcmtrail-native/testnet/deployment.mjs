@@ -1,10 +1,11 @@
-import { getBytes, Interface, keccak256, toBeHex, toUtf8Bytes } from 'ethers';
+import { getBytes, Interface, keccak256, toBeHex, toUtf8Bytes, ZeroAddress } from 'ethers';
 import { setTimeout as delay } from 'node:timers/promises';
 import { compileVaults } from '../scripts/build-vault.mjs';
 import { STARK_IMAGE, STARK_PARAMS } from './networks.mjs';
 import { custodyCap, deploymentDomain, rebuildRoot } from './notes.mjs';
 import { address } from './rpc.mjs';
 import { need, OperatorError } from './store.mjs';
+import { DAO_FEE_BPS, DAO_PERIOD, HCMT_LOCAL_SUPPLY, HCMT_PROJECT_SUPPLY, HCMT_RELAY_BOND, relayLimits } from './dao-policy.mjs';
 
 export const createSpec = (artifact, name, args = []) => ({
   name, data: artifact.bytecode + new Interface(artifact.abi).encodeDeploy(args).slice(2),
@@ -19,14 +20,15 @@ export async function view(chain, abi, to, method, args = [], at) {
 }
 
 const compiled = new Map();
-export function artifacts(network) {
-  const target = Boolean(network.tvm);
-  if (!compiled.has(target)) compiled.set(target, compileVaults({ tvm: target, testnet: true }));
+export function artifacts(network, { dao = false } = {}) {
+  const tvm = Boolean(network.tvm);
+  const target = `${tvm}:${dao}`;
+  if (!compiled.has(target)) compiled.set(target, compileVaults({ tvm, testnet: true, dao }));
   return compiled.get(target);
 }
 
 export function buildId(a, network) {
-  const img = [a.prepare, a.walk, a.chunk, a.poseidon, a.evaluator, a.vaults[network.asset]];
+  const img = [a.prepare, a.walk, a.chunk, a.poseidon, a.evaluator, a.vaults[network.asset], ...(a.token ? [a.token, a.treasury] : [])];
   return keccak256(toUtf8Bytes(JSON.stringify([img.map((x) => [x.compiler, keccak256(x.bytecode), keccak256(x.runtimeTemplate)]), a.chunks.map(keccak256)])));
 }
 
@@ -62,14 +64,15 @@ export class Transactions {
   name(label) { return `tx-${label}.json`; }
   existing(label) { const file = this.name(label); return this.store.has(file) ? this.store.read(file) : null; }
 
-  async submit(label, spec) {
+  async submit(label, spec, acceptBudget) {
     const file = this.name(label);
     const intent = { chainId: String(this.chain.network.chainId), to: spec.to ?? null, value: String(spec.value ?? 0n), data: keccak256(spec.data) };
     let journal = this.existing(label);
+    const retry = !!journal;
     if (journal) {
       need(Object.keys(intent).every((k) => journal.intent?.[k] === intent[k]), 'Existing journal is for a different transaction.');
     } else {
-      const envelope = await this.chain.prepare(spec);
+      const envelope = await this.chain.prepare(spec, acceptBudget);
       journal = { intent, envelope };
       // Must complete before the first network broadcast. Retrying never creates a second tx.
       this.store.write(file, journal);
@@ -84,6 +87,7 @@ export class Transactions {
     };
     let receipt = check(await this.chain.receipt(envelope.hash));
     if (receipt) return receipt;
+    if (retry) acceptBudget?.(envelope.budget);
     this.report({ step: label, tx: envelope.hash, signedBytes: envelope.bytes, budget: envelope.budget });
     let warning;
     try { await this.chain.broadcast(envelope); }
@@ -105,8 +109,12 @@ function parseVaultEvents(iface, vault, receipt) {
   return receipt.logs.filter((l) => l.address === vault).map((l) => iface.parseLog(l)).filter(Boolean);
 }
 
-export async function deploy(chain, store, txs, a = artifacts(chain.network)) {
-  if (store.has('manifest.json')) return verifyDeployment(chain, store.read('manifest.json'), a);
+export async function deploy(chain, store, txs, a = artifacts(chain.network), holder) {
+  if (store.has('manifest.json')) {
+    const current = store.read('manifest.json');
+    if (a.token) need(address(chain.network, holder) === current.dao?.genesisHolder, 'DAO state is for a different genesis holder.');
+    return verifyDeployment(chain, current, a);
+  }
   await chain.checkChain();
   const net = chain.network;
   const deployed = async (label, artifact, args, runtime) => {
@@ -118,6 +126,15 @@ export async function deploy(chain, store, txs, a = artifacts(chain.network)) {
     else assertRuntime(code, artifact, label);
     return [at, receipt];
   };
+  let dao, daoReceipts = [];
+  if (a.token) {
+    const genesisHolder = address(net, holder);
+    need(genesisHolder !== ZeroAddress, 'Choose a nonzero genesis holder for this local HCMT shard.');
+    const [token, mint] = await deployed('HcmtToken', a.token, [genesisHolder]);
+    const [treasury, box] = await deployed('HcmtTreasury', a.treasury, [token]);
+    dao = { token, treasury, genesisHolder, tokenTx: mint.hash, treasuryTx: box.hash };
+    daoReceipts = [mint, box];
+  }
   const [prepare, p] = await deployed('PrepareNb_A', a.prepare, []);
   const [walk, w] = await deployed('WalkNb_A', a.walk, [prepare]);
   const chunks = [], chunkReceipts = [];
@@ -125,7 +142,8 @@ export async function deploy(chain, store, txs, a = artifacts(chain.network)) {
     const [at, receipt] = await deployed(`Chunk${i}`, a.chunk, [code], code);
     chunks.push(at); chunkReceipts.push(receipt);
   }
-  const [vault, receipt] = await deployed(net.name, a.vaults[net.asset], [prepare, walk, chunks]);
+  const vaultArtifact = a.vaults[net.asset];
+  const [vault, receipt] = await deployed(vaultArtifact.name, vaultArtifact, [prepare, walk, chunks, ...(dao ? [dao.treasury] : [])]);
   const iface = new Interface(a.vaults[net.asset].abi);
   const get = (method) => view(chain, iface, vault, method);
   const expected = deploymentDomain(net, vault);
@@ -135,17 +153,18 @@ export async function deploy(chain, store, txs, a = artifacts(chain.network)) {
     starkImage: STARK_IMAGE, starkParams: STARK_PARAMS,
     stack: { prepare, walk, chunks, evaluator: await get('starkEvaluator'), poseidon: await get('poseidon') },
     created: { tx: receipt.hash, block: String(receipt.blockNumber), blockHash: receipt.blockHash },
-    deployments: [p, w, ...chunkReceipts, receipt].map(receiptSummary),
+    deployments: [...daoReceipts, p, w, ...chunkReceipts, receipt].map(receiptSummary),
+    ...(dao ? { dao } : {}),
   };
   await verifyDeployment(chain, manifest, a, receipt);
   store.write('manifest.json', manifest);
   return manifest;
 }
 
-export async function verifyDeployment(chain, manifest, a = artifacts(chain.network), receipt) {
+export async function verifyDeployment(chain, manifest, a = artifacts(chain.network, { dao: !!manifest?.dao }), receipt) {
   const net = chain.network;
   await chain.checkChain();
-  need(manifest?.schema === 1 && manifest.asset === net.asset && manifest.chainId === String(net.chainId) &&
+  need(manifest?.schema === 1 && !!manifest.dao === !!a.token && manifest.asset === net.asset && manifest.chainId === String(net.chainId) &&
     manifest.assetId === String(net.assetId) && manifest.compiler === a.vaults[net.asset].compiler &&
     manifest.build === buildId(a, net) && manifest.starkParams === STARK_PARAMS && manifest.starkImage === STARK_IMAGE,
   'Manifest is not for this pinned testnet build.');
@@ -161,6 +180,11 @@ export async function verifyDeployment(chain, manifest, a = artifacts(chain.netw
   need(domain === manifest.domain && domainLeaf === manifest.domainLeaf, 'Manifest deployment domain mismatch.');
   const checksOnVault = { asset: net.assetId, homeChainId: net.chainId, unitsPerCoin: 10n ** BigInt(net.decimals),
     custodyCap: custodyCap(net), STARK_IMAGE, STARK_PARAMS, domain, domainLeaf, poseidon, starkWalk: walk, starkEvaluator: evaluator };
+  if (a.token) {
+    const { min, max } = relayLimits(net);
+    Object.assign(checksOnVault, { treasury: manifest.dao.treasury, DAO_FEE_BPS, minRelayFee: min, maxRelayFee: max });
+    await verifyDao(chain, manifest, a);
+  }
   const iface = new Interface(a.vaults[net.asset].abi);
   // Limit concurrent RPCs on public endpoints.
   const entries = Object.entries(checksOnVault);
@@ -173,10 +197,36 @@ export async function verifyDeployment(chain, manifest, a = artifacts(chain.netw
   receipt ??= await chain.receipt(manifest.created.tx);
   need(receipt?.ok && receipt.contractAddress === vault && String(receipt.blockNumber) === manifest.created.block &&
     receipt.blockHash === manifest.created.blockHash, 'Deployment receipt missing, not confirmed, or changed.');
+  if (a.token) {
+    const init = createSpec(a.vaults[net.asset], a.vaults[net.asset].name, [prepare, walk, chunks, manifest.dao.treasury]);
+    need(await chain.creationData(receipt.hash) === init.data, 'Fee vault constructor input differs from the manifest.');
+  }
   const events = parseVaultEvents(iface, vault, receipt);
   const leaf = events.find((e) => e.name === 'LeafAppended');
   const root = events.find((e) => e.name === 'RootPublished');
   need(leaf?.args[0] === 0n && leaf.args[1] === domainLeaf && root?.args[0] === rebuildRoot([domainLeaf]) && root.args[1] === 1n,
     'Constructor domain leaf or initial tree root mismatch.');
   return manifest;
+}
+
+async function verifyDao(chain, manifest, a) {
+  const { token, treasury, genesisHolder, tokenTx, treasuryTx } = manifest.dao;
+  for (const [at, tx, art, name, args] of [
+    [token, tokenTx, a.token, 'HcmtToken', [genesisHolder]],
+    [treasury, treasuryTx, a.treasury, 'HcmtTreasury', [token]],
+  ]) {
+    need(address(chain.network, at) === at, 'Noncanonical DAO address.');
+    assertRuntime(await chain.code(at), art, name);
+    const receipt = await chain.receipt(tx);
+    need(receipt?.ok && receipt.contractAddress === at && await chain.creationData(tx) === createSpec(art, name, args).data,
+      `Confirmed ${name} creation does not match the manifest.`);
+  }
+  for (const [method, want] of Object.entries({ homeChainId: chain.network.chainId, totalSupply: HCMT_LOCAL_SUPPLY,
+    PROJECT_SUPPLY: HCMT_PROJECT_SUPPLY, genesisHolder })) {
+    need(await view(chain, a.token.abi, token, method) === want, `Wrong HCMT ${method}.`);
+  }
+  for (const [method, want] of Object.entries({ homeChainId: chain.network.chainId, hcmt: token,
+    PERIOD: DAO_PERIOD, RELAY_BOND: HCMT_RELAY_BOND })) {
+    need(await view(chain, a.treasury.abi, treasury, method) === want, `Wrong treasury ${method}.`);
+  }
 }

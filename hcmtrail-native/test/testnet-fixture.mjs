@@ -22,19 +22,24 @@ export async function evmFixture(asset, { chainId = TESTNETS[asset].chainId } = 
     return vm.provider.send(method === 'eth_bigBlockGasPrice' ? 'eth_gasPrice' : method, params);
   };
   const chain = new EvmChain(net, rpc, { key: DEMO_KEY, confirmations: 1n, gasPriceCap: 100_000_000_000n });
-  return { chain, vm, status, close: () => vm.close() };
+  const signerChain = (key) => new EvmChain(net, rpc, { key, confirmations: 1n, gasPriceCap: 100_000_000_000n });
+  const setTime = async (time) => {
+    await rpc('evm_setNextBlockTimestamp', [Number(time)]);
+    await rpc('evm_mine');
+  };
+  return { chain, vm, status, signerChain, setTime, close: () => vm.close() };
 }
 
-export async function walletFixture(asset, report = () => {}) {
+export async function walletFixture(asset, report = () => {}, { dao = false } = {}) {
   const transport = asset === 'TRX' ? await (await import('./testnet-nile-fixture.mjs')).nileFixture() : await evmFixture(asset);
   const root = mkdtempSync(join(tmpdir(), `hcmtrail-testnet-${asset}-`));
   const close = () => { transport.close(); rmSync(root, { recursive: true, force: true }); };
   try {
     const { chain } = transport;
     const store = new Store(root);
-    const a = artifacts(chain.network);
+    const a = artifacts(chain.network, { dao });
     const txs = new Transactions(chain, store, { seconds: 0, pollMs: 1, report });
-    const manifest = await deploy(chain, store, txs, a);
+    const manifest = await deploy(chain, store, txs, a, dao ? chain.sender : undefined);
     const wallet = new TestnetWallet(chain, store, txs, manifest, a.vaults[asset].abi);
     return { ...transport, store, wallet, manifest, txs, a, close };
   } catch (e) { close(); throw e; }

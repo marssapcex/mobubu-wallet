@@ -2,6 +2,8 @@
 
 **Chỉ dùng coin testnet; chưa audit, không dùng mainnet.** Bốn vault Solidity nạp/rút native trên **chính chain của vault** bằng STARK. Bắt đầu ở [runbook testnet](docs/TESTNET.md): deploy Sepolia/BSC testnet/Nile/HyperEVM testnet, lưu note cục bộ, nạp có biên nhận, tạo STARK thật và rút/khôi phục change. [Kết quả kiểm tra](docs/TESTNET-RESULTS.md) phân biệt emulator với cổng live chưa chạy. Không có deployment công khai kèm theo.
 
+**Profile có phí (testnet):** [HCMT / DAO / broadcaster](docs/HCMT-TESTNET.md) thêm phí native 0,25% mỗi lần nạp/rút, kho và 250.000 HCMT cố định cho từng chain, stake/claim theo kỳ 30 ngày và relay có bond. Chạy `npm run build:dao` / `npm run test:dao`. Đây là deployment riêng, không nâng cấp hay dùng chung note với profile gốc.
+
 [`ZamaNativeQuotes`](contracts/fhe/ZamaNativeQuotes.sol) là nghiên cứu báo giá mã hóa riêng. FHE và oracle **không** nằm trên đường tiền của vault; chưa có settlement liên mạng.
 
 Các wrapper dùng chain ID mainnet dưới đây **chỉ giữ để hồi quy emulator**, không có lệnh deploy bằng CLI testnet:

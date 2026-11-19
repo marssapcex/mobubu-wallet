@@ -18,11 +18,19 @@ export async function nileFixture({ chainId = TESTNETS.TRX.chainId } = {}) {
   const net = TESTNETS.TRX;
   const vm = await localTvm({ chainId, funded: [DEMO_SENDER, DEMO_RECIPIENT] });
   let head = 100n;
+  let time = TVM_NOW;
+  const times = new Map([[head, time]]);
+  function nextBlock(timestamp = time + 3n) {
+    assert(timestamp > time);
+    time = timestamp;
+    times.set(++head, time);
+    return block(head);
+  }
   const flags = { holdSolid: false, foreignTapos: false, noEnergy: false };
   const txs = new Map();
   const rows = [];
   const block = (number) => ({ number: q(number), hash: toBeHex(number, 8) + id(`nile-fixture:${number}`).slice(18),
-    timestamp: q(TVM_NOW + (number - 100n) * 3n), gasLimit: q(TVM_GAS) });
+    timestamp: q(times.get(number) ?? (TVM_NOW + (number - 100n) * 3n)), gasLimit: q(TVM_GAS) });
   const solid = () => flags.holdSolid ? head - 1n : head;
   let pending = Promise.resolve();
   function simulate(args) {
@@ -42,7 +50,7 @@ export async function nileFixture({ chainId = TESTNETS.TRX.chainId } = {}) {
     if (method === 'wallet/getaccountresource') return { EnergyLimit: 30_000_000, EnergyUsed: 0 };
     if (method.endsWith('/triggerconstantcontract')) {
       const value = BigInt(args.call_value);
-      const opts = { from: fromTron(args.owner_address), timestamp: BigInt(block(head).timestamp) };
+      const opts = { from: fromTron(args.owner_address), timestamp: BigInt(block(method.startsWith('walletsolidity') ? solid() : head).timestamp) };
       const { execResult: r } = await simulate(args.contract_address
         ? { ...opts, to: createAddressFromString(fromTron(args.contract_address)), value,
           data: getBytes(id(args.function_selector).slice(0, 10) + args.parameter) }
@@ -60,7 +68,7 @@ export async function nileFixture({ chainId = TESTNETS.TRX.chainId } = {}) {
       assert.equal(tx.raw_data.ref_block_bytes, q(head).slice(2).slice(-4).padStart(4, '0'));
       assert.equal(tx.raw_data.ref_block_hash, block(head).hash.slice(18, 34));
       assert(tx.raw_data.fee_limit > 0 && tx.raw_data.expiration > tx.raw_data.timestamp);
-      const b = block(++head);
+      const b = nextBlock();
       const to = p.contract_address ? fromTron(p.contract_address) : null;
       const opts = { from: owner, rootTransactionId: getBytes(txId), timestamp: BigInt(b.timestamp) };
       const result = to ? await vm.run({ ...opts, to: createAddressFromString(to), value: BigInt(p.call_value ?? 0), data: getBytes(`0x${p.data}`) })
@@ -101,5 +109,6 @@ export async function nileFixture({ chainId = TESTNETS.TRX.chainId } = {}) {
   };
   const chain = new NileChain(net, rpc, native, { key: DEMO_KEY, feeLimit: 7_500_000_000n });
   assert.equal(chain.sender, DEMO_SENDER);
-  return { chain, vm, native, rpc, flags, close: () => {} };
+  const signerChain = (key) => new NileChain(net, rpc, native, { key, feeLimit: 7_500_000_000n });
+  return { chain, vm, native, rpc, flags, signerChain, setTime: (time) => nextBlock(time), close: () => {} };
 }

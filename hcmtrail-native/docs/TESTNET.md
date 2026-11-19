@@ -2,6 +2,8 @@
 
 **Chỉ dùng coin faucet, ví testnet riêng và máy của bạn. Chưa audit; không dùng mainnet.** Đây là CLI chạy cục bộ cho nạp/rút **trên cùng một mạng**, không phải swap. FHE, Chainlink, bridge và chữ ký của operator không có quyền cấp tiền. Không có service giữ khóa, admin cứu tiền, proxy hay sweep. Hợp đồng bất biến; lỗi có thể làm mất cả tiền test.
 
+Runbook này mặc định **profile gốc không phí giao thức** (`deploy`). Với phí 0,25%, stake HCMT và broadcaster trả gas, dùng [runbook HCMT riêng](HCMT-TESTNET.md) và `dao-deploy`; các thiết lập RPC/prover ở §1–2 vẫn áp dụng.
+
 | `ASSET` | Chain ID bắt buộc | Contract | Đơn vị nhập CLI | RPC yêu cầu |
 | --- | ---: | --- | --- | --- |
 | `ETH` | `11155111` | `SepoliaVault` | wei (18 số thập phân) | Sepolia JSON-RPC có `eth_getLogs`, `eth_estimateGas` và đọc block lịch sử |
