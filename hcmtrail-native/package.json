@@ -30,7 +30,9 @@
     "test:crosschain": "node --test --test-concurrency=1 test/crosschain.test.mjs",
     "test:crosschain:fresh": "NATIVE_CROSSCHAIN_GENERATE=1 node --test --test-concurrency=1 test/crosschain.test.mjs",
     "test:crosschain:four": "node --test --test-concurrency=1 test/crosschain-four.test.mjs",
-    "test:crosschain:four:fresh": "NATIVE_FOUR_ROUTE_GENERATE=1 node --test --test-concurrency=1 test/crosschain-four.test.mjs"
+    "test:crosschain:four:fresh": "NATIVE_FOUR_ROUTE_GENERATE=1 node --test --test-concurrency=1 test/crosschain-four.test.mjs",
+    "build:receipt-proof": "node scripts/build-receipt-proof.mjs",
+    "test:receipt-proof": "node --test --test-concurrency=1 test/receipt-proof.test.mjs"
   },
   "devDependencies": {
     "@nomicfoundation/edr": "0.25.1",

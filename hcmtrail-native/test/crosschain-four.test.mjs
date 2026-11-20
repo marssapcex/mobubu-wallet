@@ -13,6 +13,7 @@ import { json, outsideSource } from '../testnet/store.mjs';
 import { TestnetWallet } from '../testnet/wallet.mjs';
 import { certificate, feeCost, on, reverts, signer, witnesses } from './crosschain-fixture.mjs';
 import { walletFixture } from './testnet-fixture.mjs';
+import { verifyHistoricalSettlement } from './receipt-proof-shadow.mjs';
 
 process.umask(0o077);
 const generate = process.env.NATIVE_FOUR_ROUTE_GENERATE === '1';
@@ -229,6 +230,19 @@ test(`Four-asset matrix: 12 quotes and ${generate ? 'new' : 'pinned'} HYPE→TRX
       assert.equal(await a.chain.balance(a.chain.sender) - lpBefore + feeCost(credit), debit);
       await accounting(a, a.source, change, 0n, 0n);
       assert.equal(await a.chain.balance(a.treasury) - srcDao0, grossIn / 400n);
+      if (key === 'bnb-eth') {
+        // Both directions of log verification on a single real trade, without changing the V1 payment path.
+        const back = await verifyHistoricalSettlement(b, a, lp, order, [
+          { tx: reservation, kind: 1, data: ZeroHash }, { tx: paid, kind: 3, data: rateHash(rate) },
+        ]);
+        const forward = await verifyHistoricalSettlement(a, b, a.source, order, [{ tx: locked, kind: 2, data: rateHash(rate) }]);
+        const gate = await a.source.read('gate');
+        // Historical evidence must not become a back door into V1 custody.
+        await assert.rejects(() => a.chain.simulate(createSpec(a.a.CrosschainNoteVault, 'CrosschainNoteVault',
+          [a.treasury, a.oracle.at, gate, back.at])), reverts('WrongWithdrawalConfig'));
+        await assert.rejects(() => b.chain.simulate(createSpec(b.a.CrosschainLiquidity, 'CrosschainLiquidity',
+          [sourceChain, a.source.at, b.treasury, forward.at])), reverts('WrongWithdrawalConfig'));
+      }
       console.log(`${src} → ${dst}: sourceNote=${value} debit=${debit} sourceChange=${change} gross=${gross} fee=${levy} net=${payout} ` +
         `proof=${getBytes(spend.proof).length}B lock=${locked.gasUsed ?? locked.energyUsed} ${a.chain.network.tvm ? 'TVM units' : 'gas'} ` +
         `pay=${paid.gasUsed ?? paid.energyUsed} ${b.chain.network.tvm ? 'TVM units' : 'gas'}`);

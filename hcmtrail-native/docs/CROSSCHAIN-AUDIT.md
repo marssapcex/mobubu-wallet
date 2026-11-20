@@ -82,6 +82,10 @@ for entry in CrosschainNoteVault CrosschainLiquidity ReceiptQuorum; do
 done
 ```
 
+## Bước thử nghiệm sau rà soát
+
+[Verifier checkpoint ETH ↔ BNB](RECEIPT-PROOFS.md) đã tách được kiểm receipt/log ra khỏi chứng thư witness cho lịch sử dưới một checkpoint bất biến. Bước này chỉ đối chiếu log; không cập nhật finality, không vào đường chi tiền V1 và không bỏ rào cản bên dưới.
+
 ## Rào cản trước khi triển khai thật
 
 1. **Finality là điều kiện chặn.** Quorum 2/3 có thể ký sai log nếu hai khóa thông đồng/bị chiếm; mất quorum có thể để escrow bị treo. Không có consensus proof, chống deep reorg, xoay witness, checkpoint hoặc policy xác minh deployment canonical cho vận hành public. Pin code chỉ chống nhầm runtime, không sửa mô hình tin cậy này.

@@ -32,6 +32,8 @@ jobs:
       - run: npm ci --ignore-scripts
       - run: npm audit --audit-level=moderate
       - run: npm run build && npm test
+      - name: Verify checkpoint ancestry and ETH/BSC receipt inclusion without signatures
+        run: npm run build:receipt-proof && npm run test:receipt-proof
       - name: Replay funded native STARK withdrawals on EVM
         run: npm run build:vault && npm run test:vault
       - name: Execute oracle and funded native STARK withdrawal on TVM

@@ -8,6 +8,8 @@
 
 **Rút native liên mạng (devnet riêng):** [Cross-chain withdrawal](docs/CROSSCHAIN-WITHDRAWAL.md) triển khai giữ note theo coin nguồn, lấy giá lúc khóa rút, và chi native đích sau đúng phí DAO. Rút nội mạng vẫn không cần giá. Bộ test [bốn coin](docs/CROSSCHAIN-AUDIT.md) tách 12 chiều báo giá khỏi các tuyến có chi trả thật trong VM: ETH → HYPE, HYPE → TRX, TRX → BNB, BNB → ETH. `npm run test:crosschain` / `npm run test:crosschain:four` (cần `TRON_SOLC` cho ma trận bốn coin). Adapter truyền log thử nghiệm tin 2/3 witness; không phải cầu/finality proof hay deployment public. Không dùng tiền thật.
 
+**Bước kiểm receipt ETH ↔ BNB:** [Verifier checkpoint](docs/RECEIPT-PROOFS.md) kiểm đường dẫn header và Merkle Patricia proof của log, không cần chữ ký witness để kiểm lịch sử đã neo. Chạy `npm run test:receipt-proof`. Checkpoint vẫn được chọn ngoài chain; chưa bật cho vault giữ tiền và không phải light client.
+
 Các wrapper dùng chain ID mainnet dưới đây **chỉ giữ để hồi quy emulator**, không có lệnh deploy bằng CLI testnet:
 
 | Tài sản | Mạng (chain ID) | Đơn vị cơ sở | Điểm vào Solidity |
