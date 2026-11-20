@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { id, toQuantity, ZeroAddress, ZeroHash } from 'ethers';
+import { id, ZeroAddress, ZeroHash } from 'ethers';
 import { daoCommand } from '../testnet/dao-ops.mjs';
 import { daoFee, HCMT_LOCAL_SUPPLY, HCMT_PROJECT_SUPPLY, HCMT_RELAY_BOND as BOND, relayLimits } from '../testnet/dao-policy.mjs';
 import { createSpec, deploy, verifyDeployment } from '../testnet/deployment.mjs';
@@ -57,104 +57,51 @@ test('immutable bindings reject the wrong chain, token, treasury and tampered cr
   await assert.rejects(() => wrong.chain.rpc('eth_estimateGas', [{ from: DEMO_SENDER,
     data: createSpec(a.token, 'HcmtToken', [DEMO_SENDER]).data }]), reverted('WrongChain'));
   await assert.rejects(() => chain.simulate(createSpec(a.token, 'HcmtToken', [ZeroAddress])), reverted('InvalidAccount'));
-  await assert.rejects(() => chain.simulate(createSpec(a.treasury, 'HcmtTreasury', [m.vault])), reverted('WrongToken'));
   const { prepare, walk, chunks } = m.stack;
+  await assert.rejects(() => chain.simulate(createSpec(a.treasury, 'HcmtTreasury', [m.vault, prepare, walk, chunks])), reverted('WrongToken'));
+  await assert.rejects(() => chain.simulate(createSpec(a.treasury, 'HcmtTreasury', [m.dao.token, m.vault, walk, chunks])), reverted('WrongStarkCode'));
   await assert.rejects(() => chain.simulate(createSpec(a.vaults.ETH, a.vaults.ETH.name, [prepare, walk, chunks, m.dao.token])), reverted('WrongTreasury'));
   await assert.rejects(() => verifyDeployment(chain, { ...m, dao: { ...m.dao, genesisHolder: DEMO_RECIPIENT } }, a), /creation does not match/);
   await assert.rejects(() => verifyDeployment(chain, { ...m, dao: { ...m.dao, tokenTx: m.created.tx } }, a), /creation does not match/);
+  await assert.rejects(() => verifyDeployment(chain, { ...m, dao: { ...m.dao, stakeGate: m.vault } }, a), /Wrong treasury stakeGate/);
+  await assert.rejects(() => verifyDeployment(chain, { ...m, dao: { ...m.dao, profile: undefined } }, a), /Wrong STARK staking profile/);
   await assert.rejects(() => f.relayChain.simulate(f.tokenSpec('transfer', [DEMO_SENDER, 1n])), reverted('InsufficientBalance'));
   await assert.rejects(() => f.relayChain.simulate(f.tokenSpec('transferFrom', [DEMO_SENDER, DEMO_RECIPIENT, 1n])), reverted('InsufficientAllowance'));
 });
 
-test('stake checkpoints are historical, carry is period-correct, claims pro rata and no double claim', async (t) => {
+test('first stake fixes the proof root, approves exact amount, and activates only next period', async (t) => {
   const f = await daoFixture('ETH');
   t.after(f.close);
-  const { wallet, chain, relayChain, manifest: m, treasuryView: get, treasurySpec: spec, tokenView } = f;
-  const cmd = (caller, method, ...args) => daoCommand(caller ? relayChain : chain, caller ? f.relayTxs : f.txs, m, f.a, method, args);
-  const depositForFee = async (fee) => wallet.deposit(wallet.newNote(fee * 400n).note);
-  await cmd(false, 'hcmt-transfer', 'fund-b', DEMO_RECIPIENT, String(2n * BOND));
-  await cmd(false, 'stake', 'a-initial', String(BOND - 1n));
-  await cmd(false, 'stake', 'a-top-up', '1');
-  await cmd(true, 'stake', 'b-initial', String(2n * BOND));
-  assert.equal(await get('totalAt', [1n]), 0n);
-  assert.equal(await get('totalAt', [2n]), 3n * BOND);
-  assert.equal(await tokenView('balanceOf', [m.dao.treasury]), 3n * BOND);
-  assert.equal(await get('isBroadcaster', [DEMO_SENDER]), false);
-  await depositForFee(10n);
-  await assert.rejects(() => chain.simulate(spec('closePeriods', [1n])), reverted('InvalidBatch'));
+  const { chain, manifest: m, stakeWallet, treasuryView: get, treasurySpec: spec } = f;
+  const cmd = (method, ...args) => daoCommand(chain, f.txs, m, f.a, method, args);
+  const key = await stakeWallet.newKey(DEMO_SENDER);
+  assert.equal((await stakeWallet.newKey(DEMO_SENDER)).authRoot, key.authRoot);
+  await assert.rejects(() => chain.simulate(spec('stake', [1n, ZeroHash])), reverted('InvalidAuthority'));
+  await cmd('stake', 'first', String(BOND - 1n), key.authRoot);
+  await cmd('stake', 'top-up', '1', key.authRoot);
+  await assert.rejects(() => cmd('stake', 'different-root', '1', id('forged root')), /root is already fixed/);
+  const status = await cmd('dao-status', DEMO_SENDER);
+  assert.equal(status.authRoot, key.authRoot);
+  assert.equal(status.authNonce, 0n);
+  assert.equal(key.profile, m.dao.profile);
+  assert.equal(key.treasury, m.dao.treasury);
+  assert(!Object.hasOwn(key, 'secret'));
+  assert.equal(status.unlockAmount, 0n);
+  assert.equal(status.activeStake, 0n);
+  assert.equal(status.nextStake, BOND);
+  assert.equal(status.isBroadcaster, false);
+  await assert.rejects(() => stakeWallet.prove(DEMO_SENDER, { kind: 'unstake', amount: BOND + 1n, recipient: DEMO_SENDER }), /exceed scheduled stake/);
+  await assert.rejects(() => stakeWallet.prove(DEMO_SENDER, { kind: 'claim', periods: '1', recipient: DEMO_SENDER }), /Period must be closed/);
+  await assert.rejects(() => cmd('close', 'too-early', '1'), reverted('InvalidBatch'));
   await f.time(2);
-  assert.equal((await cmd(false, 'dao-status', DEMO_SENDER)).isBroadcaster, true);
-  assert.equal((await cmd(true, 'dao-status', DEMO_RECIPIENT)).activeStake, 2n * BOND);
-  await depositForFee(19n);
-  await cmd(false, 'unstake', 'a-small', '1');
-  await cmd(true, 'unstake', 'b-all', String(2n * BOND));
   assert.equal(await get('isBroadcaster', [DEMO_SENDER]), true);
-  await assert.rejects(() => relayChain.simulate(spec('releaseStake')), reverted('StillLocked'));
-  await assert.rejects(() => relayChain.simulate(spec('requestUnstake', [1n])), reverted('InvalidAmount'));
-  await f.time(3);
-  assert.equal(await get('stakeAt', [DEMO_SENDER, 2n]), BOND);
-  assert.equal(await get('stakeAt', [DEMO_RECIPIENT, 2n]), 2n * BOND);
-  assert.equal(await get('stakeAt', [DEMO_SENDER, 3n]), BOND - 1n);
-  assert.equal(await get('isBroadcaster', [DEMO_SENDER]), false);
-  assert.equal(await get('isBroadcaster', [DEMO_RECIPIENT]), false);
-  await cmd(false, 'release', 'a-released');
-  await cmd(true, 'release', 'b-released');
-  assert.equal(await tokenView('balanceOf', [DEMO_RECIPIENT]), 2n * BOND);
-  assert.equal(await tokenView('balanceOf', [m.dao.treasury]), BOND - 1n);
-  await depositForFee(7n);
-  await f.time(4);
+  assert.equal(await get('stakeAt', [DEMO_SENDER, 1n]), 0n);
   await assert.rejects(() => chain.simulate(spec('closePeriods', [25n])), reverted('InvalidBatch'));
-  await cmd(false, 'close', 'close-two', '2');
-  assert.equal(await get('nextToClose'), 3n);
-  assert.equal(await get('reservedNative'), 29n);
-  assert.equal(await get('carryNative'), 0n);
-  assert.equal(await get('claimable', [DEMO_SENDER, 2n]), 9n);
-  assert.equal(await get('claimable', [DEMO_RECIPIENT, 2n]), 19n);
-  const aBefore = await chain.balance(DEMO_SENDER);
-  const ra = await cmd(false, 'claim', 'a-claim', '2');
-  assert.equal(await chain.balance(DEMO_SENDER) - aBefore + ra.gasUsed * ra.effectiveGasPrice, 9n);
-  await assert.rejects(() => chain.simulate(spec('claim', [[2n]])), reverted('AlreadyClaimed'));
-  await assert.rejects(() => relayChain.simulate(spec('claim', [[2n, 2n]])), reverted('AlreadyClaimed'));
-  assert.equal(await get('claimed', [2n, DEMO_RECIPIENT]), false);
-  assert.equal(await get('reservedNative'), 20n);
-  const bBefore = await chain.balance(DEMO_RECIPIENT);
-  const rb = await cmd(true, 'claim', 'b-claim', '2');
-  assert.equal(await chain.balance(DEMO_RECIPIENT) - bBefore + rb.gasUsed * rb.effectiveGasPrice, 19n);
-  assert.equal(await get('reservedNative'), 0n);
-  assert.equal(await chain.balance(m.dao.treasury), 8n);
-  assert.equal(await get('receiptsByPeriod', [3n]), 7n);
-  assert.equal(await get('receiptsByPeriod', [4n]), 1n); // late dust cannot enrich an elapsed period
-  await cmd(true, 'close', 'permissionless', '24'); // Only period 3 remains ended.
-  assert.equal(await get('claimable', [DEMO_SENDER, 3n]), 7n);
-  assert.equal(await get('claimable', [DEMO_RECIPIENT, 3n]), 0n);
-  await cmd(false, 'claim', 'period-three', '3');
-  assert.equal(await chain.balance(m.dao.treasury), 1n);
-});
-
-test('failed reward payout reverts claim and reserve, and can be retried once payable', async (t) => {
-  const f = await daoFixture('ETH');
-  t.after(f.close);
-  const { chain, wallet, manifest: m, treasuryView: get } = f;
-  const receiver = await f.switchReceiver();
-  await f.transfer(BOND, receiver.at);
-  await f.send('contract-stake', receiver.spec('stake', [m.dao.token, m.dao.treasury, BOND]));
-  await f.time(2);
-  const fee = 123n;
-  await wallet.deposit(wallet.newNote(fee * 400n).note);
-  await f.time(3);
-  await f.send('close-1-2', f.treasurySpec('closePeriods', [2n]));
-  const claim = receiver.spec('claim', [m.dao.treasury, [2n]]);
-  await assert.rejects(() => chain.simulate(claim), reverted('NativeTransferFailed'));
-  const tx = await chain.rpc('eth_sendTransaction', [{ from: chain.sender, to: claim.to, data: claim.data, gas: toQuantity(600_000) }]);
-  assert.equal((await chain.receipt(tx)).ok, false);
-  assert.equal(await get('claimed', [2n, receiver.at]), false);
-  assert.equal(await get('reservedNative'), fee);
-  assert.equal(await chain.balance(m.dao.treasury), fee);
-  await f.send('allow-claim', receiver.spec('allowPayment'));
-  await f.send('claim-to-contract', claim);
-  assert.equal(await get('claimed', [2n, receiver.at]), true);
-  assert.equal(await get('reservedNative'), 0n);
-  assert.equal(await chain.balance(receiver.at), fee);
+  await assert.rejects(() => cmd('release', 'without-authorization', DEMO_SENDER), reverted('StillLocked'));
+  assert(!f.a.treasury.abi.some((entry) => entry.type === 'function' && (
+    (entry.name === 'requestUnstake' && entry.inputs.length === 1) ||
+    (entry.name === 'claim' && entry.inputs.length === 1) ||
+    (entry.name === 'releaseStake' && entry.inputs.length === 0))));
 });
 
 test('relay floor, cap, exact quoted signer, shape/domain checks and underfunded guard precede proof work', async (t) => {

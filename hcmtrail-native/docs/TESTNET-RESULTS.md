@@ -1,6 +1,6 @@
 # Hồ sơ kiểm tra · ứng viên audit vault native testnet
 
-**Phạm vi:** testnet-only, STARK local exit và CLI lưu/khôi phục note. Oracle, FHE và swap liên mạng nằm ngoài đường tiền. **Chưa có giao dịch hoặc deployment public trong hồ sơ này.** Địa chỉ, block và tx hash xuất hiện trong bằng chứng emulator **không** phải địa chỉ để nạp tiền hay link explorer. Dùng [runbook](TESTNET.md) để tạo deployment mới bằng coin faucet.
+**Phạm vi:** profile **không phí** của vault native testnet, STARK local exit và CLI lưu/khôi phục note. Profile treasury [HCMT `stake-stark-v1`](STAKING-STARK.md) có bộ proof và số đo riêng. Oracle và swap liên mạng nằm ngoài đường tiền. **Chưa có giao dịch hoặc deployment public trong hồ sơ này.** Địa chỉ, block và tx hash xuất hiện trong bằng chứng emulator **không** phải địa chỉ để nạp tiền hay link explorer. Dùng [runbook](TESTNET.md) để tạo deployment mới bằng coin faucet.
 
 ## Kết quả thực thi cục bộ
 
@@ -21,7 +21,7 @@ Số đo là chi phí của giao dịch thành công, không phải gas estimate
 
 - `npm run build:testnet` và `-- --tvm`: pass, artifacts tách biệt. `npm run test:testnet` **9/9**: dựng stack trên bốn domain, kiểm local Poseidon/u64, chain/bytecode pin, khôi phục biên nhận khi mất phản hồi broadcast, thiếu log, proof từ domain cũ, TVM TAPOS/solidified và cờ HyperEVM large-block. Không chấp nhận log trống là nạp thành công.
 - `npm run test:vault` 4/4 và `npm run test:vault:tvm` 2/2: bốn proof funded cũ vẫn trả đúng native; có test sai root/amount/recipient, replay, rollback khi payout lỗi. Các wrapper cũ là hồi quy, không deploy bằng CLI.
-- Oracle hồi quy 9 EVM + 1 TVM, demo 12/12 chiều **báo giá**, FHE Solidity host fixture 7/7. Không biến những test này thành bằng chứng swap, KMS hoặc settlement live.
+- Oracle hồi quy 9 EVM + 1 TVM, demo 12/12 chiều **báo giá**. Không biến những test này thành bằng chứng swap hoặc settlement live.
 - `npm ci --ignore-scripts` và `npm audit --audit-level=moderate` trên bản source độc lập chạy được; 0 advisory dependency ở lần chạy này. Đây **không phải** audit mật mã, Solidity hay quy trình custody.
 - `build-testnet-prover.sh` pin nguồn AGPL NotBefore prover và BLAKE3; cài lại từ source độc lập bằng cùng toolchain cho đúng SHA-256 của cả hai binary trong `prover.json`. `test:stark` replay verifier tham chiếu riêng **6/6**. Cùng input công khai nhưng entropy luôn mới; proof khác byte vẫn hợp lệ. Không dùng lại seed/khóa fixture hay receipt emulator lên testnet.
 

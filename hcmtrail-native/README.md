@@ -1,10 +1,10 @@
-# hcmtrail native · Vault STARK, oracle và báo giá FHE
+# hcmtrail native · Vault STARK, staking HCMT và oracle
 
 **Chỉ dùng coin testnet; chưa audit, không dùng mainnet.** Bốn vault Solidity nạp/rút native trên **chính chain của vault** bằng STARK. Bắt đầu ở [runbook testnet](docs/TESTNET.md): deploy Sepolia/BSC testnet/Nile/HyperEVM testnet, lưu note cục bộ, nạp có biên nhận, tạo STARK thật và rút/khôi phục change. [Kết quả kiểm tra](docs/TESTNET-RESULTS.md) phân biệt emulator với cổng live chưa chạy. Không có deployment công khai kèm theo.
 
-**Profile có phí (testnet):** [HCMT / DAO / broadcaster](docs/HCMT-TESTNET.md) thêm phí native 0,25% mỗi lần nạp/rút, kho và 250.000 HCMT cố định cho từng chain, stake/claim theo kỳ 30 ngày và relay có bond. Chạy `npm run build:dao` / `npm run test:dao`. Đây là deployment riêng, không nâng cấp hay dùng chung note với profile gốc.
+**Profile có phí (testnet):** [HCMT / DAO / broadcaster](docs/HCMT-TESTNET.md) thêm phí native 0,25% mỗi lần nạp/rút, kho và 250.000 HCMT cố định cho từng chain, stake/claim theo kỳ 30 ngày và relay có bond. [STARK bắt buộc cho lệnh unstake và claim](docs/STAKING-STARK.md); signer gas không có quyền thay người nhận. Chạy `npm run build:dao`, `npm run test:dao` và `npm run test:stake`. Đây là deployment riêng; không nâng cấp treasury cũ hay dùng chung note với profile gốc.
 
-[`ZamaNativeQuotes`](contracts/fhe/ZamaNativeQuotes.sol) là nghiên cứu báo giá mã hóa riêng. FHE và oracle **không** nằm trên đường tiền của vault; chưa có settlement liên mạng.
+Đã gỡ module báo giá mã hóa và các dependency của nó khỏi thư mục này. Oracle vẫn độc lập; ví có thể tự tính báo giá từ epoch công khai. Chưa có settlement liên mạng.
 
 Các wrapper dùng chain ID mainnet dưới đây **chỉ giữ để hồi quy emulator**, không có lệnh deploy bằng CLI testnet:
 
@@ -25,7 +25,6 @@ Node.js 22+, trong thư mục này:
 npm ci --ignore-scripts
 npm run build && npm test && npm run demo
 npm run build:vault && npm run test:vault
-npm run build:fhe && npm run test:fhe:evm
 ```
 
 `test:vault` dựng stack và nạp tiền trong EVM bộ nhớ, rồi gửi proof của chính các note đó từ tài khoản khác. Test còn cố sửa amount, recipient, phí, root và nullifier, đổi domain, thử verifier giả và thử replay sau khi rút. Xem [VAULTS.md](docs/VAULTS.md) cho cấu trúc proof, cách sinh vector mới và các giới hạn.
@@ -38,8 +37,8 @@ export TRON_SOLC=/tmp/hcmtrail-native-tron-solc
 npm run build -- --tvm
 npm run build:vault -- --tvm
 npm run test:tvm && npm run test:vault:tvm
-npm run test:fhe        # Linux getrandom, C/C++ compiler, curl, tar, patch; tải TFHE đã pin
-npm run test:fhe:trace  # replay trace Solidity với TFHE thật, KMS/host fixture
+npm run build:dao && npm run build:dao -- --tvm
+npm run test:dao && npm run test:stake
 ```
 
 TVMJS thực thi bytecode của compiler TRON và chuyển số dư sun trong bộ nhớ. Bộ test [testnet](docs/TESTNET.md) còn dựng và ký protobuf/TAPOS cục bộ nhưng **không** thay cho kiểm tra java-tron, phí Energy thật, finality hay giới hạn node công khai. Chỉ CLI `npm run testnet` do người dùng chủ động cấu hình signer/RPC mới gửi giao dịch công khai; các test không gửi.
@@ -52,10 +51,6 @@ TVMJS thực thi bytecode của compiler TRON và chuyển số dư sun trong b�
 
 Ví có thể đọc epoch công khai rồi tính riêng. Đừng gửi amount riêng vào `quote()` qua RPC. [`CHAINLINK.md`](docs/CHAINLINK.md) ghi nguồn, precision/heartbeat và candidate hub; chưa pin oracle triển khai công khai.
 
-## Phép tính FHE nằm trong Solidity
-
-`ZamaNativeQuotes` import `@fhevm/solidity@0.13.4`. Ví gửi `debit` và `minOut` đã mã hóa; contract dùng `FHE.fromExternal`, `mul`, `div`, so sánh và `select` trên handle. Amount đầu ra chỉ cho requester giải mã; nếu chọn public thì chỉ bit hợp lệ được giải mã và xác minh bằng `FHE.checkSignatures` với đúng epoch và request. Địa chỉ requester và tuyến vẫn công khai. Xem [FHE.md](docs/FHE.md) cho miền `euint128`, ví dụ SDK và hai mức test (EDR fixture và replay TFHE thật).
-
-Host cấu hình Ethereum/Sepolia; test local dùng `31337`. Chưa có xác nhận live, cấu hình FHEVM trên BSC/TVM/HyperEVM, hay payout liên mạng. [`REFERENCES.md`](docs/REFERENCES.md) ghi nguồn tham chiếu. [`SETTLEMENT.md`](docs/SETTLEMENT.md) liệt kê phần còn thiếu: ràng buộc ciphertext và epoch vào proof của debit, giữ chỗ thanh khoản, kiểm finality và claim đích. Không thay những phần đó bằng chữ ký nhà vận hành.
+[`REFERENCES.md`](docs/REFERENCES.md) ghi nguồn verifier. [`SETTLEMENT.md`](docs/SETTLEMENT.md) là yêu cầu nghiên cứu cho dự trữ, finality và claim liên mạng, không phải tính năng đã bật.
 
 **Không đưa tiền thật vào.** Có thể mất tiền do lỗi prover/verifier, gửi sai note, nhận tiền bị revert hoặc vault không còn liveness. Chưa audit, chưa chứng nhận anonymity hoặc an toàn hậu lượng tử. Không xóa cây nguồn cũ khi bản mới chưa thay thế được nó.

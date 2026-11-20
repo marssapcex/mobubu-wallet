@@ -6,3 +6,5 @@ export const DAO_PERIOD = 30n * 24n * 60n * 60n;
 export const DAO_FEE_BPS = 25n;
 export const daoFee = (gross) => BigInt(gross) / (10_000n / DAO_FEE_BPS);
 export const relayLimits = ({ decimals }) => ({ min: 10n ** BigInt(decimals - 5), max: 10n ** BigInt(decimals - 4) });
+export const STAKE_PROFILE = 'stake-stark-v1';
+export const STAKE_AUTH_ASSET = 0x48434d5453544b31n;

@@ -1,6 +1,6 @@
 # HCMT · kho phí native, staking và broadcaster testnet
 
-**Chỉ coin faucet, chưa audit, chưa deploy lên mạng công khai.** Đây là profile triển khai mới (`dao-deploy`), không nâng cấp vault cũ (`deploy`), không chuyển note giữa hai bản. Không có nhánh tiền mainnet trong profile này.
+**Chỉ coin faucet, chưa audit, chưa deploy lên mạng công khai.** `dao-deploy` dựng profile **`stake-stark-v1`**: fee vault + treasury với khóa chi staking độc lập. Không nâng cấp được vault gốc (`deploy`) hoặc treasury HCMT bản cũ; không import note/stake từ deployment khác. Không có nhánh tiền mainnet trong profile này.
 
 ## Chính sách đã mã hóa
 
@@ -26,9 +26,9 @@ Ví dụ nạp `0,001 ETH`: treasury nhận `0,0000025 ETH`, note có `0,0009975
 
 ### Phân phối mỗi kỳ 30 ngày
 
-Kỳ `1` bắt đầu lúc treasury deploy, mỗi kỳ đúng `30 days`, không theo ngày đầu tháng UTC. Kỳ của các chain có thể lệch nhau. `stake` và `requestUnstake` chỉ đổi trọng số từ **kỳ kế tiếp**; việc giải phóng HCMT cũng phải đợi đến kỳ đó. Mỗi địa chỉ giữ lịch sử checkpoint; đóng/claim không duyệt danh sách staker. Không gửi HCMT trực tiếp vào treasury: làm vậy không ghi nhận stake và không có đường trả lại. Dùng `stake` (approve đúng số rồi stake).
+Kỳ `1` bắt đầu lúc treasury deploy, mỗi kỳ đúng `30 days`, không theo ngày đầu tháng UTC. Kỳ của các chain có thể lệch nhau. `stake` và `requestUnstake` chỉ đổi trọng số từ **kỳ kế tiếp**; việc giải phóng HCMT cũng phải đợi đến kỳ đó. Mỗi địa chỉ giữ lịch sử checkpoint; đóng/claim không duyệt danh sách staker. Không gửi HCMT trực tiếp vào treasury: làm vậy không ghi nhận stake và không có đường trả lại. Dùng `stake` (approve đúng số rồi stake), với một `authRoot` cố định ngay lần khóa đầu. [Runbook STARK staking](STAKING-STARK.md) mô tả cách tạo và sao lưu secret độc lập với ví gas.
 
-Mặc định testnet: **100% doanh thu được ghi nhận của kỳ + khoản chuyển tiếp**, không có APR cố định hay tỷ lệ 4,2%. Có thể nhận native donation qua `receive`; tiền cưỡng bức vào balance không đi qua `receive` không được phân bổ/sweep. Nếu không ai active, cả pot chuyển tiếp cho kỳ tiếp theo có stake. Ai cũng có thể `closePeriods(1..24)` sau khi kỳ kết thúc, theo thứ tự cũ → mới. Sau khi đóng, mỗi staker tự `claim` (tối đa 32 kỳ/lần), nhận `floor(pot × trọng số lịch sử / tổng trọng số lịch sử)` đúng một lần. Reward cũ vẫn claim được sau khi rời stake, không hết hạn. Phần lẻ chỉ nhập kỳ **đang mở** sau khi toàn bộ trọng số của kỳ cũ đã claim; chừng nào còn người chưa claim thì phần đó vẫn được giữ. Địa chỉ stake phải nhận được native; khôi phục claim không có quyền đổi địa chỉ payout.
+Mặc định testnet: **100% doanh thu được ghi nhận của kỳ + khoản chuyển tiếp**, không có APR cố định hay tỷ lệ 4,2%. Có thể nhận native donation qua `receive`; tiền cưỡng bức vào balance không đi qua `receive` không được phân bổ/sweep. Nếu không ai active, cả pot chuyển tiếp cho kỳ tiếp theo có stake. Ai cũng có thể `closePeriods(1..24)` sau khi kỳ kết thúc, theo thứ tự cũ → mới. Sau khi đóng, chủ stake tạo STARK cho `claim` (tối đa 32 kỳ/lần), nhận `floor(pot × trọng số lịch sử / tổng trọng số lịch sử)` đúng một lần. Reward cũ vẫn claim được sau khi rời stake, không hết hạn. Phần lẻ chỉ nhập kỳ **đang mở** sau khi toàn bộ trọng số của kỳ cũ đã claim; chừng nào còn người chưa claim thì phần đó vẫn được giữ. Proof khóa đích nhận thưởng. Với lấy lại HCMT, STARK khóa số lượng, kỳ mở khóa và đích; sau khi đến hạn, `releaseStake(staker)` gửi đúng đích đó dù ai trả gas. Không có đường unstake/claim chỉ dựa vào ECDSA.
 
 ### Broadcaster tối giản: quote và request JSON
 
@@ -48,11 +48,12 @@ Dùng [TESTNET.md §1–2](TESTNET.md) để cài compiler/prover, thiết lập
 npm run build:dao
 npm run build:dao -- --tvm       # TRON_SOLC đã pin
 npm run test:dao                # EDR + TVMJS; không dùng RPC công khai
+npm run test:stake              # replay proof STARK thật cho unstake/claim trên EVM và TVM
 NATIVE_TESTNET_ASSETS=ETH npm run test:dao:fresh  # STARK mới; bỏ biến để chạy 4 mạng, chạy tuần tự
 
 # Chỉ thực hiện khối dưới nếu bạn CHỦ ĐỘNG thử trên testnet sau khi duyệt genesis/cap.
 # Hai biến địa chỉ là địa chỉ TESTNET đã chọn; holder không nhất thiết là deployer.
-tn dao-deploy "$GENESIS_HOLDER"  # 8 tx: token, treasury và stack 6 tx; giữ manifest.json đã xác nhận
+tn dao-deploy "$GENESIS_HOLDER"  # 8 tx; treasury tạo gate STARK riêng, dùng chung các verifier chunk đã pin
 tn inspect
 ```
 
@@ -69,20 +70,15 @@ tn withdraw "$EXIT"
 tn recover-exit "$EXIT"
 ```
 
-Stake và claim: dùng signer nắm HCMT cho bước stake/claim, genesis holder cho bước phát hành phân bổ bằng transfer. Các `OP_ID` dưới đây là ví dụ; dùng ID mới cho operation mới, giữ **cùng** ID và tham số để retry operation cũ.
+Stake/unstake/claim theo [runbook khóa STARK](STAKING-STARK.md). Sau khi đã chuyển đủ HCMT cho broadcaster, chỉ công khai `authRoot` từ máy giữ credential; để **signer của broadcaster** gửi `stake`:
 
 ```bash
 tn hcmt-transfer fund-relay-01 "$BROADCASTER_ADDRESS" 100000000000000000000
-# Đổi sang signer broadcaster (hoặc dùng ví testnet của broadcaster) để khóa 100 HCMT của nó:
-tn stake stake-100-01 100000000000000000000
-tn dao-status "$BROADCASTER_ADDRESS"        # active từ kỳ 2 nếu stake trong kỳ 1
-# Khi cả kỳ 1 và kỳ 2 đã kết thúc (không giả thời gian trên testnet thật):
-tn close end-01-02 2                         # signer bất kỳ có gas
-tn dao-status "$BROADCASTER_ADDRESS" 2
-tn claim reward-02 2                        # signer của stake; xem claimableNative trước
-tn unstake scheduled-off-01 100000000000000000000
-# Khi kỳ kế tiếp bắt đầu:
-tn release stake-release-01
+# Trên máy giữ credential, trước khi khóa tiền:
+tn stake-key-new "$BROADCASTER_ADDRESS"     # sao lưu file riêng; chuyển CHỈ authRoot cho signer
+# Với signer của broadcaster:
+tn stake stake-100-01 100000000000000000000 "$AUTH_ROOT"
+tn dao-status "$BROADCASTER_ADDRESS"         # active từ kỳ 2 nếu stake trong kỳ 1
 ```
 
 Để thử riêng nhánh relay, stake và đợi active **trước** khi yêu cầu rút; không dùng lại một note đã rút. Trên máy broadcaster, import duy nhất manifest `0600` của deployment đã đối chiếu vào `NATIVE_RELAY_STATE_DIR` bên ngoài repo, và cấu hình `NATIVE_RELAY_SIGNER_FILE` là key gas cục bộ của broadcaster. Không dùng đồng thời signer đó trong tiến trình/thư mục khác. Ví dụ trên EVM (Nile thay `PRICE=10`):
@@ -110,6 +106,6 @@ Nếu báo pending/timeout, tra ID trong journal và đợi chính receipt đó;
 ## Bảo mật và giới hạn
 
 - Treasury và HCMT công khai toàn bộ balance, stake, lịch sử và claim. Broadcaster **thấy** nội dung public exit, gồm địa chỉ, amount, phí, thời điểm/metadata kết nối. Nó không cần opening, private signer key của người dùng, hay quyền đổi người nhận. STARK che note đầu vào được chọn và opening; không bảo đảm không thể liên kết giao dịch.
-- Không có chữ ký admin, upgrade key hay oracle trong đường custody. Tuy vậy, **không thể gọi cả hệ thống là hậu lượng tử**: account, giao dịch gas, token/stake/claim, mạng và ví hiện dùng secp256k1/ECDSA; các tham số hash/STARK và verifier chưa audit độc lập. Mất khóa HCMT hoặc lộ opening note không có phương án cứu.
+- Không có chữ ký admin, upgrade key hay oracle trong đường custody. Tuy vậy, **không thể gọi cả hệ thống là hậu lượng tử**: giao dịch gas, HCMT chưa khóa, tài khoản nhận và đồng thuận chain vẫn có lớp chữ ký cổ điển; các tham số hash/STARK và verifier chưa audit độc lập. Mất credential staking có thể khóa vốn/thưởng vĩnh viễn; mất khóa gas không cấp quyền đổi đích của STARK.
 - Chỉ xác thực từ một manifest đúng nguồn. `inspect` kiểm chain, bytecode, immutable links, source build ID, constructor input và receipts đã xác nhận. Một contract báo đúng symbol không chứng minh là HCMT chuẩn. Runtime hash một mình không chứng minh constructor/genesis state; cần kiểm provenance và chốt danh sách deployment.
 - Bản này chỉ xác minh trong VM. Phải duyệt chính sách (khớp cap gốc, holder, phân bổ/kỳ/thời gian khóa), audit contract, prover/verifier, rồi lấy receipt live cho đủ bốn mạng trước bất kỳ tuyên bố sẵn sàng nào. Đặc biệt kiểm CPU/Energy/Bandwidth/byte admission Nile và large-block của HyperEVM. Không dùng tiền thật.

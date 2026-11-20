@@ -19,8 +19,8 @@ struct NativeExit {
 }
 
 /// @notice Native-only local custody research vault; never deploy with real funds.
-/// @dev No oracle/FHE bypass, bridge, administrator, token registration, or privileged sweep.
-/// This implements ONLY the local native note relation, not an FHE-authorized or interchain exit.
+/// @dev No oracle bypass, bridge, administrator, token registration, or privileged sweep.
+/// This implements ONLY the local native note relation, not an interchain exit.
 abstract contract NativeVault is NativeStark, NativeNoteTree {
     uint256 private constant NOTE_DOMAIN = 0x4e4f5445;
     uint256 public constant TIME_GRID = 600;

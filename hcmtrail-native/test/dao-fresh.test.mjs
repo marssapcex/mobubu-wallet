@@ -136,8 +136,6 @@ for (const asset of assets) test(`${asset} HCMT: real bonded withdrawal with DAO
     await f.send('close', f.treasurySpec('closePeriods', [2n]));
     const claimable = await treasuryView('claimable', [relayChain.sender, 2n]);
     assert.equal(claimable, await chain.balance(m.dao.treasury));
-    const claim = await f.send('claim', f.treasurySpec('claim', [[2n]]), true);
-    assert.equal(await chain.balance(m.dao.treasury), 0n);
-    assert.equal(await treasuryView('reservedNative'), 0n);
-    show('monthly-reward', { claimable, claim: claim.hash });
+    assert.equal(await treasuryView('reservedNative'), claimable);
+    show('monthly-reward-available', { claimable }); // STARK-gated reward payout is covered in staking.test.mjs.
   });

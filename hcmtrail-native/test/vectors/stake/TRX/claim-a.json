@@ -1,0 +1,29 @@
+{
+  "schema": 1,
+  "profile": "stake-stark-v1",
+  "asset": "TRX",
+  "chainId": "3448148188",
+  "treasury": "0xFE7396B2bA53dD0358645F1E4450a7Ba01407410",
+  "id": "0xe4b3b8f5664d3c3aa3dcedeb1cb91a7e725eaaed18ef3a61b2f334d51f40f9f8",
+  "staker": "0x7E5F4552091A69125d5DfCb7b8C2659029395Bdf",
+  "action": {
+    "kind": "claim",
+    "recipient": "0xAB92C684a7f36C3634B295A7C5BE4D1Cc1aCb723",
+    "periods": [
+      "2",
+      "3"
+    ]
+  },
+  "permit": {
+    "nonce": "1",
+    "notBefore": "1789999800",
+    "nullifiers": [
+      "0xbc745f90821ce826f81f27debc5d4d7c18a652030efe44d6b57da434028b3570",
+      "0x1bf046975f27011c00ffddadf34ba2f8d998ec10bb1f5e84e4b6e588617d14a3"
+    ],
+    "outputs": [
+      "0x86bb6e4f60c40a07d075581028fa17a5bf37463bd1d1015081f9a59232910942",
+      "0x48669872e17d25caeaec4ac9da5b468d221f6d94bca048f78d000d0ffa8374d6"
+    ]
+  }
+}

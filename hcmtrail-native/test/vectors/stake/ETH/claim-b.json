@@ -1,0 +1,28 @@
+{
+  "schema": 1,
+  "profile": "stake-stark-v1",
+  "asset": "ETH",
+  "chainId": "11155111",
+  "treasury": "0x5CF7F96627F3C9903763d128A1cc5D97556A6b99",
+  "id": "0xf0f5c7548687ef47386190935d60aa19a9230afda4e72824465836d8c83679b0",
+  "staker": "0x2B5AD5c4795c026514f8317c7a215E218DcCD6cF",
+  "action": {
+    "kind": "claim",
+    "recipient": "0x6813Eb9362372EEF6200f3b1dbC3f819671cBA69",
+    "periods": [
+      "2"
+    ]
+  },
+  "permit": {
+    "nonce": "0",
+    "notBefore": "1789999800",
+    "nullifiers": [
+      "0x9768903e6b5a0ea8996c143f672e9568803ec269647288afc916a2176274e828",
+      "0xac1caefe0483d93afec2da3f51cc523158026441c82b38166a76c66141639a36"
+    ],
+    "outputs": [
+      "0x2d4ab4e2db8817e524abc9e7bc69a167e7c9d8156cf50452f0a6a977345eebb6",
+      "0x40e4ece1089bac33ad9ca56ec76374768cb9eff84ee1227c2c5e831c52aa27f2"
+    ]
+  }
+}

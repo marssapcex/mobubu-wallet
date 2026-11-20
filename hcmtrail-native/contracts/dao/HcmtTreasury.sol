@@ -4,8 +4,10 @@ pragma solidity 0.8.24;
 import {HcmtPolicy} from "./HcmtPolicy.sol";
 import {HcmtPins} from "./HcmtPins.sol";
 import {HcmtToken} from "./HcmtToken.sol";
+import {HcmtStakeGate, StakePermit} from "./HcmtStakeGate.sol";
+import {Goldilocks} from "../vendor/nonos/libraries/Goldilocks.sol";
 
-/// @notice Immutable local native-fee treasury and HCMT stake escrow. No keys, transfers across chains, or sweep.
+/// @notice Immutable local native-fee treasury and STARK-authorized HCMT stake escrow. No admin or sweep.
 /// Positions are effective from the next period. Ended-period rewards use these historical weights.
 contract HcmtTreasury {
     uint256 public constant PERIOD = HcmtPolicy.PERIOD;
@@ -14,10 +16,12 @@ contract HcmtTreasury {
     uint256 public constant MAX_CLAIM = 32;
 
     struct Checkpoint { uint64 period; uint192 weight; }
-    struct Unlock { uint64 period; uint192 amount; }
+    struct Unlock { uint64 period; uint192 amount; address recipient; }
+    struct Authority { bytes32 root; uint64 nonce; }
     struct Reward { uint256 pot; uint256 weight; uint256 claimedWeight; uint256 remaining; }
 
     HcmtToken public hcmt;
+    HcmtStakeGate public stakeGate;
     uint256 public homeChainId;
     uint256 public startedAt;
     uint64 public nextToClose;
@@ -27,18 +31,26 @@ contract HcmtTreasury {
     mapping(uint64 => Reward) public rewards;
     mapping(uint64 => mapping(address => bool)) public claimed;
     mapping(address => Unlock) public unlocks;
+    mapping(address => Authority) public authorities;
     mapping(address => Checkpoint[]) private accounts;
     Checkpoint[] private aggregate;
     bool private entered;
 
     event Revenue(uint64 indexed period, address indexed from, uint256 amount);
     event StakeScheduled(address indexed staker, uint64 indexed effectivePeriod, uint256 weight);
-    event StakeReleased(address indexed staker, uint256 amount);
+    event StakeAuthorityRegistered(address indexed staker, bytes32 root);
+    event StakeAuthorized(address indexed staker, uint64 indexed nonce, bytes32 challenge);
+    event UnlockScheduled(address indexed staker, address indexed recipient, uint64 period, uint256 amount);
+    event StakeReleased(address indexed staker, address indexed recipient, uint256 amount);
     event PeriodClosed(uint64 indexed period, uint256 pot, uint256 weight, uint256 carried);
     event RoundingRecycled(uint64 indexed period, uint256 amount);
-    event RewardClaimed(uint64 indexed period, address indexed staker, uint256 amount);
+    event RewardClaimed(uint64 indexed period, address indexed staker, address indexed recipient, uint256 amount);
     error WrongChain();
     error WrongToken();
+    error InvalidAuthority();
+    error WrongStakeNonce();
+    error WrongUnlockPeriod();
+    error InvalidRecipient();
     error InvalidAmount();
     error PendingUnlock();
     error StillLocked();
@@ -49,12 +61,13 @@ contract HcmtTreasury {
     error NativeTransferFailed();
     error Reentrant();
 
-    constructor(HcmtToken token) {
+    constructor(HcmtToken token, address prepare, address walk, address[3] memory chunks) {
         uint256 chain = block.chainid;
         if (!HcmtPolicy.supported(chain)) revert WrongChain();
         if (address(token).codehash != HcmtPins.token(chain == 0xcd8690dc)
             || token.homeChainId() != chain || token.totalSupply() != HcmtPolicy.LOCAL_SUPPLY) revert WrongToken();
         hcmt = token;
+        stakeGate = new HcmtStakeGate(chain == 0xcd8690dc, prepare, walk, chunks);
         homeChainId = chain;
         startedAt = block.timestamp;
         nextToClose = 1;
@@ -93,30 +106,64 @@ contract HcmtTreasury {
         return block.chainid == homeChainId && stakeAt(who, currentPeriod()) >= RELAY_BOND;
     }
 
-    function stake(uint256 amount) external guard {
+    /// @notice A caller locks its own HCMT. Its independently held proof credential is fixed on first lock.
+    function stake(uint256 amount, bytes32 authRoot) external guard {
         if (amount == 0 || amount > HcmtPolicy.LOCAL_SUPPLY) revert InvalidAmount();
+        Authority storage auth = authorities[msg.sender];
+        if (auth.root == bytes32(0)) {
+            if (authRoot == bytes32(0) || !Goldilocks.isCanonicalDigest(authRoot)) revert InvalidAuthority();
+            auth.root = authRoot;
+            emit StakeAuthorityRegistered(msg.sender, authRoot);
+        } else if (authRoot != auth.root) {
+            revert InvalidAuthority();
+        }
         uint64 next = currentPeriod() + 1;
         _schedule(msg.sender, next, stakeAt(msg.sender, next) + amount, totalAt(next) + amount);
         if (!hcmt.transferFrom(msg.sender, address(this), amount)) revert InvalidAmount();
     }
 
-    function requestUnstake(uint256 amount) external guard {
-        uint64 next = currentPeriod() + 1;
-        uint256 weight = stakeAt(msg.sender, next);
+    /// @notice Only the proof can schedule an unlock; a gas signer cannot choose the recipient or period.
+    function requestUnstake(address staker, uint256 amount, address recipient, uint64 effectivePeriod,
+        bytes calldata proof, StakePermit calldata permit) external guard
+    {
+        _recipient(recipient);
+        if (effectivePeriod != currentPeriod() + 1) revert WrongUnlockPeriod();
+        uint256 weight = stakeAt(staker, effectivePeriod);
         if (amount == 0 || amount > weight) revert InvalidAmount();
-        Unlock storage u = unlocks[msg.sender];
-        if (u.amount != 0 && u.period != next) revert PendingUnlock();
-        u.period = next;
-        u.amount += uint192(amount);
-        _schedule(msg.sender, next, weight - amount, totalAt(next) - amount);
+        if (unlocks[staker].amount != 0) revert PendingUnlock();
+        _authorize(staker, keccak256(abi.encode(uint8(1), amount, recipient, effectivePeriod)), proof, permit);
+        unlocks[staker] = Unlock(effectivePeriod, uint192(amount), recipient);
+        _schedule(staker, effectivePeriod, weight - amount, totalAt(effectivePeriod) - amount);
+        emit UnlockScheduled(staker, recipient, effectivePeriod, amount);
     }
 
-    function releaseStake() external guard {
-        Unlock memory u = unlocks[msg.sender];
+    /// @notice Anyone may finish a matured unlock. Amount and recipient were fixed by its proof.
+    function releaseStake(address staker) external guard {
+        Unlock memory u = unlocks[staker];
         if (u.amount == 0 || currentPeriod() < u.period) revert StillLocked();
-        delete unlocks[msg.sender];
-        if (!hcmt.transfer(msg.sender, u.amount)) revert InvalidAmount();
-        emit StakeReleased(msg.sender, u.amount);
+        delete unlocks[staker];
+        if (!hcmt.transfer(u.recipient, u.amount)) revert InvalidAmount();
+        emit StakeReleased(staker, u.recipient, u.amount);
+    }
+
+    function stakeChallenge(address staker, uint64 nonce, bytes32 action) public view returns (bytes32) {
+        return keccak256(abi.encode("HCMTRAIL-HCMT-STAKE-AUTH-v1", homeChainId, address(this), staker, nonce, action));
+    }
+
+    function _authorize(address staker, bytes32 action, bytes calldata proof, StakePermit calldata permit) private {
+        Authority storage auth = authorities[staker];
+        if (auth.root == bytes32(0)) revert InvalidAuthority();
+        if (permit.nonce != auth.nonce) revert WrongStakeNonce();
+        bytes32 challenge = stakeChallenge(staker, permit.nonce, action);
+        stakeGate.verify(proof, auth.root, challenge, permit);
+        // The reusable credential is not a money note. This nonce, not the synthetic circuit
+        // nullifier, prevents replay. It is consumed atomically with the authorized transition.
+        ++auth.nonce;
+        emit StakeAuthorized(staker, permit.nonce, challenge);
+    }
+
+    function _recipient(address who) private view {
+        if (who == address(0) || who == address(this) || who == address(hcmt)) revert InvalidRecipient();
     }
 
     /// @notice Anyone may close ended periods, with bounded work. Accounts never need to roll in a loop.
@@ -147,18 +194,21 @@ contract HcmtTreasury {
         return _share(r.pot, stakeAt(who, period), r.weight);
     }
 
-    /// @notice Claim multiple periods together; payout always goes to the staker (no redirect parameter).
-    function claim(uint64[] calldata periods) external guard returns (uint256 paid) {
+    /// @notice Claim closed periods for a staker, to exactly the recipient authorized by their proof.
+    function claim(address staker, address payable recipient, uint64[] calldata periods,
+        bytes calldata proof, StakePermit calldata permit) external guard returns (uint256 paid)
+    {
+        _recipient(recipient);
         if (periods.length == 0 || periods.length > MAX_CLAIM) revert InvalidBatch();
         for (uint256 i; i < periods.length; ++i) {
             uint64 period = periods[i];
             if (period == 0 || period >= nextToClose) revert PeriodNotClosed();
-            if (claimed[period][msg.sender]) revert AlreadyClaimed();
+            if (claimed[period][staker]) revert AlreadyClaimed();
             Reward storage r = rewards[period];
-            uint256 weight = stakeAt(msg.sender, period);
+            uint256 weight = stakeAt(staker, period);
             if (weight == 0 || r.weight == 0) revert NothingToClaim();
             uint256 due = _share(r.pot, weight, r.weight);
-            claimed[period][msg.sender] = true;
+            claimed[period][staker] = true;
             r.claimedWeight += weight;
             r.remaining -= due;
             reservedNative -= due;
@@ -174,10 +224,11 @@ contract HcmtTreasury {
                     emit RoundingRecycled(active, dust);
                 }
             }
-            emit RewardClaimed(period, msg.sender, due);
+            emit RewardClaimed(period, staker, recipient, due);
         }
+        _authorize(staker, keccak256(abi.encode(uint8(2), recipient, periods)), proof, permit);
         if (paid != 0) {
-            (bool sent,) = payable(msg.sender).call{value: paid}("");
+            (bool sent,) = recipient.call{value: paid}("");
             if (!sent) revert NativeTransferFailed();
         }
     }

@@ -2,6 +2,7 @@ import { artifacts, deploy, Transactions, verifyDeployment } from '../testnet/de
 import { daoArity, daoCommand } from '../testnet/dao-ops.mjs';
 import { DAO_FEE_BPS } from '../testnet/dao-policy.mjs';
 import { RelayOperator } from '../testnet/relay.mjs';
+import { StakeWallet } from '../testnet/staking.mjs';
 import { TESTNETS } from '../testnet/networks.mjs';
 import { checkProver } from '../testnet/prover.mjs';
 import { EvmChain, httpRpc, NileChain } from '../testnet/rpc.mjs';
@@ -11,7 +12,7 @@ import { TestnetWallet } from '../testnet/wallet.mjs';
 const help = `Chỉ dùng coin TESTNET trên máy riêng (Linux x86-64, Node 22+).
 Usage: npm run --silent testnet -- <ETH|BNB|TRX|HYPE> <command> [args]
   deploy                            Deploy/verify the original no-fee STARK stack
-  dao-deploy GENESIS_HOLDER          Deploy the fee profile; assign 250,000 local HCMT
+  dao-deploy GENESIS_HOLDER          Deploy the fee & STARK staking profile; assign 250,000 local HCMT
   inspect                           Check manifest, domain, code and confirmed deployment
   note-new GROSS_BASE               Save a private opening for the net deposited amount
   deposit NOTE                      Fund the saved note and verify its receipt
@@ -24,11 +25,14 @@ Usage: npm run --silent testnet -- <ETH|BNB|TRX|HYPE> <command> [args]
 Fee profile only (HCMT amounts have 18 decimals on all four chains):
   dao-status WHO [PERIOD]            Show stake, eligibility and claimable native reward
   hcmt-transfer OP_ID TO HCMT_BASE   Distribute local HCMT (not a cross-chain transfer)
-  stake OP_ID HCMT_BASE              Approve and schedule stake for next 30-day period
-  unstake OP_ID HCMT_BASE            Schedule a decrease & release at the next period
-  release OP_ID                      Withdraw matured HCMT from stake escrow
+  stake-key-new STAKER              Create a local credential; report public root and backup filename
+  stake OP_ID HCMT_BASE AUTH_ROOT    Approve & lock HCMT; immutable root fixed on first stake
+  unstake-proof STAKER HCMT_BASE TO   Authorize a next-period unlock to TO with a local STARK
+  claim-proof STAKER TO PERIODS      Authorize native payout to TO; comma-separated closed periods
+  stake-check PROOF_FILE            Review and simulate with your gas account; no tx signed
+  stake-submit PROOF_FILE           Sponsor the exact proof-authorized action, no staker key needed
+  release OP_ID STAKER              Anyone can finish a matured unlock to its fixed recipient
   close OP_ID COUNT                  Permissionlessly close 1–24 ended periods
-  claim OP_ID PERIOD[,PERIOD...]     Claim up to 32 distinct closed periods
   relay-export EXIT_ID               Export ONLY the public request JSON (wallet side)
   relay-quote FEE_BASE               Quote your dedicated eligible signer's fixed price
   relay-check FEE_BASE REQUEST      Validate/simulate a public request; no signing
@@ -39,16 +43,17 @@ NATIVE_RPC_URL and external NATIVE_STATE_DIR; signing: NATIVE_SIGNER_FILE (mode 
 Broadcaster: separate NATIVE_RELAY_STATE_DIR + NATIVE_RELAY_SIGNER_FILE; import only manifest.json.
 Use a fresh OP_ID for a new DAO operation; retry an uncertain transaction with the same arguments and ID.
 `;
+const stakeArity = Object.freeze({ 'stake-key-new': [1], 'unstake-proof': [3], 'claim-proof': [3], 'stake-check': [1], 'stake-submit': [1] });
 const arity = new Map(Object.entries({ deploy: [0], 'dao-deploy': [1], inspect: [0], 'note-new': [1], deposit: [1], recover: [1, 2],
   prove: [3, 4], preflight: [1], withdraw: [1], 'recover-exit': [1, 2], 'relay-export': [1],
-  'relay-quote': [1], 'relay-check': [2], 'relay-submit': [2], ...daoArity }));
+  'relay-quote': [1], 'relay-check': [2], 'relay-submit': [2], ...daoArity, ...stakeArity }));
 const relayCommands = new Set(['relay-quote', 'relay-check', 'relay-submit']);
-const signing = new Set(['deploy', 'dao-deploy', 'deposit', 'preflight', 'withdraw', ...relayCommands,
+const signing = new Set(['deploy', 'dao-deploy', 'deposit', 'preflight', 'withdraw', 'stake-check', 'stake-submit', ...relayCommands,
   ...Object.keys(daoArity).filter((c) => c !== 'dao-status')]);
 
 function exchangeFile(path, maxBytes) {
   try { return JSON.parse(privateText(outsideSource(path), maxBytes)); }
-  catch (e) { if (e instanceof OperatorError) throw e; throw new OperatorError('Expected a readable owner-only quote/request JSON outside the checkout.'); }
+  catch (e) { if (e instanceof OperatorError) throw e; throw new OperatorError('Expected a readable owner-only quote/request/permit JSON outside the checkout.'); }
 }
 
 function seconds(env, lo, hi, fallback) {
@@ -91,6 +96,17 @@ async function main(args) {
       if (command === 'relay-quote') return worker.quote();
       const request = exchangeFile(params[1], 270_000);
       return command === 'relay-check' ? worker.preflight(request) : worker.submit(request);
+    }
+    if (Object.hasOwn(stakeArity, command)) {
+      const staking = new StakeWallet(chain, store, txs, manifest, a.treasury?.abi);
+      if (command === 'stake-key-new') return staking.newKey(params[0]);
+      if (command === 'unstake-proof' || command === 'claim-proof') {
+        const action = command === 'unstake-proof' ? { kind: 'unstake', amount: params[1], recipient: params[2] }
+          : { kind: 'claim', recipient: params[1], periods: params[2] };
+        return staking.prove(params[0], action, checkProver(env.NATIVE_STARK_PROVER_DIR));
+      }
+      const permit = exchangeFile(params[0], 270_000);
+      return command === 'stake-check' ? staking.check(permit) : staking.submit(permit);
     }
     if (Object.hasOwn(daoArity, command)) return daoCommand(chain, txs, manifest, a, command, params);
     const wallet = new TestnetWallet(chain, store, txs, manifest, a.vaults[asset].abi);

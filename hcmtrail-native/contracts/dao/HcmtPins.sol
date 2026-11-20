@@ -9,6 +9,6 @@ library HcmtPins {
     }
 
     function treasury(bool tvm) internal pure returns (bytes32) {
-        return tvm ? bytes32(0x1f744707b7cc1526daaa92f1750734f81a3d58723e25b7895884bff5a3a215cc) : bytes32(0x32af5f8524a78affe00d9fd689c79b8f06eb9aa0d1b8534095415bbd18c9c388);
+        return tvm ? bytes32(0x3b2c0cf2308318db0eccf2b834947d902bee9f86c2d9ef9abdbfbeb5b967b9fc) : bytes32(0x3145a42affbda956e3c7170bd6391beaad03b091731b5e66d1964368c41faf08);
     }
 }

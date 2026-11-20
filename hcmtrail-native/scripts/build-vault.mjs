@@ -46,14 +46,14 @@ function pins({ prepare, walk }) {
 }
 
 export function compileDao(tvm = false) {
-  const { artifact } = compileSolidity(['HcmtPolicy', 'HcmtPins', 'HcmtToken', 'HcmtTreasury'].map((name) => `${daoDir}/${name}.sol`),
+  const { artifact } = compileSolidity([...files(nonos), 'contracts/vault/NativeStark.sol',
+    ...['HcmtPolicy', 'HcmtPins', 'HcmtToken', 'HcmtTreasury', 'HcmtStakeGate'].map((name) => `${daoDir}/${name}.sol`)],
     { tvm, settings: { metadata: { bytecodeHash: 'none' } } });
   return { token: artifact(`${daoDir}/HcmtToken.sol`, 'HcmtToken'), treasury: artifact(`${daoDir}/HcmtTreasury.sol`, 'HcmtTreasury') };
 }
 
 export function compileVaults({ tvm = false, fixtures = false, pinsOnly = false, testnet = false, dao = false } = {}) {
   const entryPoints = (dao ? daoVaults : testnet ? testnets : vaults).filter(([symbol]) => (symbol === 'TRX') === tvm);
-  // Never send the separate FHEVM host contracts (or their npm dependencies) to tron-solc.
   const paths = files(nonos);
   if (!pinsOnly) paths.push('contracts/NativeAssets.sol', ...files('contracts/vault'), ...new Set(entryPoints.map(([, path]) => path)));
   if (dao && !pinsOnly) paths.push(...files(daoDir).filter((path) => !paths.includes(path)));
@@ -72,6 +72,7 @@ export function compileVaults({ tvm = false, fixtures = false, pinsOnly = false,
     ...(dao ? {
       token: artifact(`${daoDir}/HcmtToken.sol`, 'HcmtToken'),
       treasury: artifact(`${daoDir}/HcmtTreasury.sol`, 'HcmtTreasury'),
+      stakeGate: artifact(`${daoDir}/HcmtStakeGate.sol`, 'HcmtStakeGate'),
     } : {}),
     vaults: Object.fromEntries(entryPoints.map(([symbol, path, name]) => [symbol, { ...artifact(path, name), name }])),
     ...(fixtures ? { reenter: artifact(fixture, 'ReenterNative'), force: artifact(fixture, 'ForceNative') } : {}),
@@ -94,12 +95,12 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
   } else if (args.includes('--pins')) {
     console.log(JSON.stringify(compileVaults({ tvm, pinsOnly: true }), null, 2));
   } else {
-    const { prepare, walk, chunk, chunks, vaults, poseidon, evaluator, token, treasury } = compileVaults({ tvm, testnet, dao });
+    const { prepare, walk, chunk, chunks, vaults, poseidon, evaluator, token, treasury, stakeGate } = compileVaults({ tvm, testnet, dao });
     const dir = new URL(`build/${tvm ? 'tvm' : 'evm'}/${dao ? 'dao-vaults' : testnet ? 'testnet-vaults' : 'vaults'}/`, root);
     mkdirSync(dir, { recursive: true });
     const artifacts = { PrepareNb_A: prepare, WalkNb_A: walk, Chunk: chunk,
       EvaluatorChunks: chunks, ...(testnet || dao ? { PoseidonGoldilocks: poseidon, NbStraightEvaluatorAt: evaluator } : {}),
-      ...(dao ? { HcmtToken: token, HcmtTreasury: treasury } : {}),
+      ...(dao ? { HcmtToken: token, HcmtTreasury: treasury, HcmtStakeGate: stakeGate } : {}),
       ...Object.fromEntries(Object.values(vaults).map((v) => [v.name, v])) };
     for (const [name, artifact] of Object.entries(artifacts)) {
       writeFileSync(new URL(`${name}.json`, dir), `${JSON.stringify(artifact, null, 2)}\n`);

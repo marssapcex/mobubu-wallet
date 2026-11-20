@@ -5,7 +5,7 @@ import { STARK_IMAGE, STARK_PARAMS } from './networks.mjs';
 import { custodyCap, deploymentDomain, rebuildRoot } from './notes.mjs';
 import { address } from './rpc.mjs';
 import { need, OperatorError } from './store.mjs';
-import { DAO_FEE_BPS, DAO_PERIOD, HCMT_LOCAL_SUPPLY, HCMT_PROJECT_SUPPLY, HCMT_RELAY_BOND, relayLimits } from './dao-policy.mjs';
+import { DAO_FEE_BPS, DAO_PERIOD, HCMT_LOCAL_SUPPLY, HCMT_PROJECT_SUPPLY, HCMT_RELAY_BOND, STAKE_AUTH_ASSET, STAKE_PROFILE, relayLimits } from './dao-policy.mjs';
 
 export const createSpec = (artifact, name, args = []) => ({
   name, data: artifact.bytecode + new Interface(artifact.abi).encodeDeploy(args).slice(2),
@@ -28,7 +28,7 @@ export function artifacts(network, { dao = false } = {}) {
 }
 
 export function buildId(a, network) {
-  const img = [a.prepare, a.walk, a.chunk, a.poseidon, a.evaluator, a.vaults[network.asset], ...(a.token ? [a.token, a.treasury] : [])];
+  const img = [a.prepare, a.walk, a.chunk, a.poseidon, a.evaluator, a.vaults[network.asset], ...(a.token ? [a.token, a.treasury, a.stakeGate] : [])];
   return keccak256(toUtf8Bytes(JSON.stringify([img.map((x) => [x.compiler, keccak256(x.bytecode), keccak256(x.runtimeTemplate)]), a.chunks.map(keccak256)])));
 }
 
@@ -126,14 +126,14 @@ export async function deploy(chain, store, txs, a = artifacts(chain.network), ho
     else assertRuntime(code, artifact, label);
     return [at, receipt];
   };
-  let dao, daoReceipts = [];
+  let dao;
+  const daoReceipts = [];
   if (a.token) {
     const genesisHolder = address(net, holder);
     need(genesisHolder !== ZeroAddress, 'Choose a nonzero genesis holder for this local HCMT shard.');
     const [token, mint] = await deployed('HcmtToken', a.token, [genesisHolder]);
-    const [treasury, box] = await deployed('HcmtTreasury', a.treasury, [token]);
-    dao = { token, treasury, genesisHolder, tokenTx: mint.hash, treasuryTx: box.hash };
-    daoReceipts = [mint, box];
+    dao = { profile: STAKE_PROFILE, token, genesisHolder, tokenTx: mint.hash };
+    daoReceipts.push(mint);
   }
   const [prepare, p] = await deployed('PrepareNb_A', a.prepare, []);
   const [walk, w] = await deployed('WalkNb_A', a.walk, [prepare]);
@@ -141,6 +141,12 @@ export async function deploy(chain, store, txs, a = artifacts(chain.network), ho
   for (const [i, code] of a.chunks.entries()) {
     const [at, receipt] = await deployed(`Chunk${i}`, a.chunk, [code], code);
     chunks.push(at); chunkReceipts.push(receipt);
+  }
+  if (dao) {
+    const [treasury, box] = await deployed('HcmtTreasury', a.treasury, [dao.token, prepare, walk, chunks]);
+    const stakeGate = await view(chain, a.treasury.abi, treasury, 'stakeGate');
+    Object.assign(dao, { treasury, treasuryTx: box.hash, stakeGate });
+    daoReceipts.push(box);
   }
   const vaultArtifact = a.vaults[net.asset];
   const [vault, receipt] = await deployed(vaultArtifact.name, vaultArtifact, [prepare, walk, chunks, ...(dao ? [dao.treasury] : [])]);
@@ -153,7 +159,7 @@ export async function deploy(chain, store, txs, a = artifacts(chain.network), ho
     starkImage: STARK_IMAGE, starkParams: STARK_PARAMS,
     stack: { prepare, walk, chunks, evaluator: await get('starkEvaluator'), poseidon: await get('poseidon') },
     created: { tx: receipt.hash, block: String(receipt.blockNumber), blockHash: receipt.blockHash },
-    deployments: [...daoReceipts, p, w, ...chunkReceipts, receipt].map(receiptSummary),
+    deployments: [...daoReceipts.slice(0, 1), p, w, ...chunkReceipts, ...daoReceipts.slice(1), receipt].map(receiptSummary),
     ...(dao ? { dao } : {}),
   };
   await verifyDeployment(chain, manifest, a, receipt);
@@ -210,10 +216,12 @@ export async function verifyDeployment(chain, manifest, a = artifacts(chain.netw
 }
 
 async function verifyDao(chain, manifest, a) {
-  const { token, treasury, genesisHolder, tokenTx, treasuryTx } = manifest.dao;
+  const { token, treasury, genesisHolder, tokenTx, treasuryTx, stakeGate, profile } = manifest.dao;
+  const { prepare, walk, chunks } = manifest.stack;
+  need(profile === STAKE_PROFILE && address(chain.network, stakeGate) === stakeGate, 'Wrong STARK staking profile.');
   for (const [at, tx, art, name, args] of [
     [token, tokenTx, a.token, 'HcmtToken', [genesisHolder]],
-    [treasury, treasuryTx, a.treasury, 'HcmtTreasury', [token]],
+    [treasury, treasuryTx, a.treasury, 'HcmtTreasury', [token, prepare, walk, chunks]],
   ]) {
     need(address(chain.network, at) === at, 'Noncanonical DAO address.');
     assertRuntime(await chain.code(at), art, name);
@@ -225,8 +233,16 @@ async function verifyDao(chain, manifest, a) {
     PROJECT_SUPPLY: HCMT_PROJECT_SUPPLY, genesisHolder })) {
     need(await view(chain, a.token.abi, token, method) === want, `Wrong HCMT ${method}.`);
   }
-  for (const [method, want] of Object.entries({ homeChainId: chain.network.chainId, hcmt: token,
+  for (const [method, want] of Object.entries({ homeChainId: chain.network.chainId, hcmt: token, stakeGate,
     PERIOD: DAO_PERIOD, RELAY_BOND: HCMT_RELAY_BOND })) {
     need(await view(chain, a.treasury.abi, treasury, method) === want, `Wrong treasury ${method}.`);
   }
+  assertRuntime(await chain.code(stakeGate), a.stakeGate, 'HCMT stake gate');
+  for (const [method, want] of Object.entries({ STARK_IMAGE, STARK_PARAMS, AUTH_ASSET: STAKE_AUTH_ASSET, starkWalk: walk })) {
+    need(await view(chain, a.stakeGate.abi, stakeGate, method) === want, `Wrong stake gate ${method}.`);
+  }
+  const evaluator = await view(chain, a.stakeGate.abi, stakeGate, 'starkEvaluator');
+  assertRuntime(await chain.code(evaluator), a.evaluator, 'HCMT stake evaluator');
+  const links = await view(chain, a.evaluator.abi, evaluator, 'chunks');
+  need(links.length === 3 && chunks.every((at, i) => links[i] === at), 'Wrong stake evaluator chunk order.');
 }

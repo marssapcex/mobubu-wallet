@@ -1,7 +1,7 @@
 {
   "name": "hcmtrail-native-oracle-lab",
   "version": "0.1.0",
-  "description": "Four native STARK vaults, Chainlink epochs and Zama FHEVM quotes; no interchain settlement or public deployment",
+  "description": "Four native STARK vaults, STARK-authorized HCMT staking, and standalone Chainlink epochs; testnet only",
   "private": true,
   "type": "module",
   "engines": {
@@ -15,22 +15,19 @@
     "test:vault": "node --test test/vault.test.mjs",
     "test:vault:tvm": "node --test test/vault.tvm.test.mjs",
     "demo": "node scripts/local-demo.mjs",
-    "test:fhe": "bash scripts/test-fhe.sh",
     "test:stark": "bash scripts/test-stark-reference.sh",
     "bundle": "bash scripts/bundle-source.sh",
-    "build:fhe": "node scripts/build-fhe.mjs",
-    "test:fhe:evm": "node --test test/zama-quote.test.mjs",
-    "test:fhe:trace": "bash scripts/test-fhe.sh --trace",
     "testnet": "node scripts/testnet.mjs",
     "build:testnet": "node scripts/build-vault.mjs --testnet",
     "test:testnet": "node --test --test-concurrency=1 test/testnet.test.mjs",
     "test:testnet:fresh": "node --test --test-concurrency=1 test/testnet-fresh.test.mjs",
     "build:dao": "node scripts/build-vault.mjs --dao",
     "test:dao": "node --test --test-concurrency=1 test/dao.test.mjs",
-    "test:dao:fresh": "node --test --test-concurrency=1 test/dao-fresh.test.mjs"
+    "test:dao:fresh": "node --test --test-concurrency=1 test/dao-fresh.test.mjs",
+    "test:stake": "node --test --test-concurrency=1 test/staking.test.mjs",
+    "test:stake:fresh": "NATIVE_STAKE_GENERATE=1 node --test --test-concurrency=1 test/staking.test.mjs"
   },
   "devDependencies": {
-    "@fhevm/solidity": "0.13.4",
     "@nomicfoundation/edr": "0.25.1",
     "@tvmjs/common": "1.2.0",
     "@tvmjs/tvm": "1.2.0",
