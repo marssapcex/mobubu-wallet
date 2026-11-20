@@ -2,24 +2,24 @@ import assert from 'node:assert/strict';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { AbiCoder, computeAddress, getBytes, hexlify, id, Interface, parseEther, toBeHex, toQuantity, Wallet, ZeroAddress, ZeroHash } from 'ethers';
+import { getBytes, hexlify, id, Interface, parseEther, toQuantity, ZeroAddress, ZeroHash } from 'ethers';
 import { test } from 'node:test';
 import { compileCrosschain } from '../scripts/build-crosschain.mjs';
 import { orderId, previewOrder, proveCrosschain, rateHash, saveCrosschainRefund } from '../testnet/crosschain.mjs';
-import { assertRuntime, callSpec, createSpec, Transactions, view } from '../testnet/deployment.mjs';
+import { callSpec, createSpec } from '../testnet/deployment.mjs';
 import { openNote } from '../testnet/notes.mjs';
 import { challengeAddresses } from '../testnet/staking.mjs';
 import { checkProver, proofHash } from '../testnet/prover.mjs';
-import { json, outsideSource, Store } from '../testnet/store.mjs';
+import { json, outsideSource } from '../testnet/store.mjs';
 import { TestnetWallet } from '../testnet/wallet.mjs';
-import { DEMO_RECIPIENT, DEMO_SENDER, walletFixture } from './testnet-fixture.mjs';
+import { DEMO_RECIPIENT, walletFixture } from './testnet-fixture.mjs';
+import { certificate, localPayee, on, reverts, signer, witnesses } from './crosschain-fixture.mjs';
 
 process.umask(0o077);
 const generate = process.env.NATIVE_CROSSCHAIN_GENERATE === '1';
 const prover = generate ? checkProver(process.env.NATIVE_STARK_PROVER_DIR) : null;
 const output = generate && process.env.NATIVE_CROSSCHAIN_VECTORS_DIR ? outsideSource(process.env.NATIVE_CROSSCHAIN_VECTORS_DIR) : null;
 const vectors = fileURLToPath(new URL('./vectors/crosschain/', import.meta.url));
-const encode = AbiCoder.defaultAbiCoder();
 const time = 1_796_000_000n;
 const WAD = 10n ** 18n;
 const netIn = parseEther('0.9975'), grossOut = parseEther('31.171875');
@@ -27,56 +27,6 @@ const levy = parseEther('0.0779296875'), netOut = parseEther('31.0939453125');
 const entryFee = parseEther('0.0025');
 const routeCap = parseEther('32');
 const inventory = routeCap * 2n;
-const selector = (name) => id(`${name}()`).slice(0, 10);
-const reverts = (name) => (e) => e.revert === selector(name) || e.data?.startsWith?.(selector(name));
-const key2 = toBeHex(2n, 32);
-const localPayee = computeAddress(toBeHex(3n, 32));
-const witnesses = [11n, 22n, 33n].map((x) => new Wallet(toBeHex(x, 32)))
-  .sort((a, b) => a.address.toLowerCase().localeCompare(b.address.toLowerCase())); // test keys only
-const signatures = ['tuple(uint64 blockNumber,bytes32 blockHash,bytes32 transactionHash,uint32 logIndex)', 'tuple(bytes32 r,bytes32 s,uint8 v)[2]'];
-const typed = { FinalizedWithdrawalLog: [
-  ['remoteChain', 'uint256'], ['emitter', 'address'], ['kind', 'uint8'], ['order', 'bytes32'], ['data', 'bytes32'],
-  ['blockNumber', 'uint64'], ['blockHash', 'bytes32'], ['transactionHash', 'bytes32'], ['logIndex', 'uint32'], ['consumer', 'address'],
-].map(([name, type]) => ({ name, type })) };
-
-async function on(f, a, name, args = []) {
-  const spec = createSpec(a[name], name, args);
-  const receipt = await f.txs.submit(`deploy-cross-${name}`, spec);
-  assertRuntime(await f.chain.code(receipt.contractAddress), a[name], name);
-  assert.equal(await f.chain.creationData(receipt.hash), spec.data);
-  const at = receipt.contractAddress, abi = new Interface(a[name].abi);
-  return { at, abi, receipt, spec: (method, args, value) => callSpec(abi, at, method, args, value),
-    read: (method, args) => view(f.chain, abi, at, method, args) };
-}
-
-function signer(f, name) {
-  const chain = f.signerChain(key2);
-  const dir = f.store.path(name);
-  mkdirSync(dir, { mode: 0o700 });
-  return new Transactions(chain, new Store(dir), { seconds: 0, pollMs: 1 });
-}
-
-async function certificate(from, contract, tx, to, adapter, consumer, kind, order, data = ZeroHash) {
-  const confirmed = await from.chain.receipt(tx.hash);
-  assert(confirmed?.ok && confirmed.blockHash === tx.blockHash);
-  const matches = confirmed.logs.filter((log) => log.address === contract.at && log.topics[0] === contract.abi.getEvent('SettlementMessage').topicHash)
-    .filter((log) => {
-      const e = contract.abi.parseLog(log).args;
-      return e[0] === BigInt(kind) && e[1] === order && e[2] === data;
-    });
-  assert.equal(matches.length, 1);
-  const at = { blockNumber: confirmed.blockNumber, blockHash: confirmed.blockHash, transactionHash: confirmed.hash, logIndex: matches[0].index };
-  const domain = { name: 'Hcmtrail Withdrawal Finality', version: '1', chainId: to.chain.network.chainId, verifyingContract: adapter.at };
-  const message = { remoteChain: from.chain.network.chainId, emitter: contract.at, kind, order, data, ...at, consumer: consumer.at };
-  const sigs = await Promise.all(witnesses.slice(0, 2).map((w) => w.signTypedData(domain, typed, message)));
-  const split = sigs.map((wire) => ({ r: wire.slice(0, 66), s: `0x${wire.slice(66, 130)}`, v: Number.parseInt(wire.slice(130), 16) }));
-  return { good: encode.encode(signatures, [at, split]), duplicate: encode.encode(signatures, [at, [split[0], split[0]]]),
-    wrongConsumer: encode.encode(signatures, [at, await Promise.all(witnesses.slice(0, 2).map(async (w) => {
-      const r = await w.signTypedData(domain, typed, { ...message, consumer: DEMO_SENDER });
-      return { r: r.slice(0, 66), s: `0x${r.slice(66, 130)}`, v: Number.parseInt(r.slice(130), 16) };
-    }))]) };
-}
-
 function load(name) {
   const p = resolve(vectors, name);
   const proof = hexlify(readFileSync(`${p}.bin`));
@@ -120,6 +70,10 @@ test(`ETH → HYPE: ${generate ? 'fresh' : 'pinned'} STARKs, withdrawal-time pri
     assert.equal(await gate.read('starkWalk'), walk);
     await assert.rejects(() => A.chain.simulate(createSpec(a.CrosschainNoteVault, 'CrosschainNoteVault',
       [A.manifest.dao.treasury, oracle.at, qa.at, qa.at])), reverts('WrongSpendStack'));
+    for (const [prices, adapter] of [[qa.at, qa.at], [oracle.at, oracle.at]]) {
+      await assert.rejects(() => A.chain.simulate(createSpec(a.CrosschainNoteVault, 'CrosschainNoteVault',
+        [A.manifest.dao.treasury, prices, gate.at, adapter])), reverts('WrongWithdrawalConfig'));
+    }
     const source = await on(A, a, 'CrosschainNoteVault', [A.manifest.dao.treasury, oracle.at, gate.at, qa.at]);
     const liquidity = await on(B, a, 'CrosschainLiquidity', [A.chain.network.chainId, source.at, B.manifest.dao.treasury, qb.at]);
     const receiver = await on(B, a, 'PayoutSwitch');
@@ -133,7 +87,6 @@ test(`ETH → HYPE: ${generate ? 'fresh' : 'pinned'} STARKs, withdrawal-time pri
       const stamp = (await A.chain.head()).timestamp;
       const amounts = [2500n, 550n, 1n, hype].map((x) => x * 10n ** 8n);
       for (let i = 0; i < 4; ++i) await A.txs.submit(`cross-px-${round}-${i}`, callSpec(feed[i].abi, feed[i].at, 'report', [round, amounts[i], stamp, stamp]));
-      return A.txs.submit(`cross-epoch-${round}`, oracle.spec('refresh'));
     };
     const known = (noteValue, tag) => openNote(A.chain.network, noteValue,
       [11n, 38n, 55n, 124n].map((x) => x + tag), [51n, 76n, 96n, 243n].map((x) => x + tag * 3n));
@@ -153,7 +106,7 @@ test(`ETH → HYPE: ${generate ? 'fresh' : 'pinned'} STARKs, withdrawal-time pri
     const order = orderId(o);
     assert.deepEqual(saveCrosschainRefund(A.store, A.chain.network, o, refund), { id: order, refundNote: refund.leaf });
     assert.throws(() => saveCrosschainRefund(A.store, A.chain.network, o, opening), /does not open/);
-    await assert.rejects(() => A.chain.call(source.spec('quote', [o])), reverts('NoEpoch'));
+    await assert.rejects(() => A.chain.call(source.spec('quote', [o])), reverts('InvalidRound(uint8)'));
     await price(1, 60n);
     await assert.rejects(() => A.chain.call(source.spec('quote', [o])), reverts('OutOfBounds')); // 41.5625 HYPE > LP cap
     await assert.rejects(() => B.chain.simulate(liquidity.spec('reserve', [o])), reverts('InsufficientLiquidity'));
@@ -165,6 +118,9 @@ test(`ETH → HYPE: ${generate ? 'fresh' : 'pinned'} STARKs, withdrawal-time pri
     await price(2, 100n);
     await assert.rejects(() => A.chain.call(source.spec('quote', [o])), reverts('OutOfBounds')); // 24.9375 gross < minNetOut
     await price(3, 80n);
+    // No keeper called refresh and an unrelated BNB feed is offline; the ETH/HYPE pair still works.
+    assert.equal((await oracle.read('publishedEpoch')).id, ZeroHash);
+    await A.txs.submit('cross-offline-bnb', callSpec(feed[1].abi, feed[1].at, 'setOffline', [true]));
     const [r0, fee, net] = source.abi.decodeFunctionResult('quote', await A.chain.call(source.spec('quote', [o])));
     assert.equal(r0.grossOut, grossOut);
     assert.equal(fee, levy);
@@ -178,7 +134,7 @@ test(`ETH → HYPE: ${generate ? 'fresh' : 'pinned'} STARKs, withdrawal-time pri
     assert.equal(sunOut[2], sunOut[0].grossOut - sunOut[1]);
     const temporarilyStale = await A.chain.rpc('evm_snapshot');
     await A.setTime(time + 2100n);
-    await assert.rejects(() => A.chain.call(source.spec('quote', [o])), reverts('EpochExpired'));
+    await assert.rejects(() => A.chain.call(source.spec('quote', [o])), reverts('StaleRound(uint8)'));
     assert(await A.chain.rpc('evm_revert', [temporarilyStale]));
     const tree = await wallet.ledger.snapshot();
     await assert.rejects(() => proveCrosschain(A.store, A.chain.network, null, { ...o, salt: id('no refund backup') }, opening,
@@ -197,6 +153,9 @@ test(`ETH → HYPE: ${generate ? 'fresh' : 'pinned'} STARKs, withdrawal-time pri
     assert.equal(local.exit.nullifiers[0], publicSpend.nullifiers[0]);
     const lock = (cert, order = o, payload = proof) => source.spec('lockWithdrawal', [order, publicSpend, payload, cert]);
     await assert.rejects(() => A.chain.call(lock('0x')), reverts('UnverifiedEvent'));
+    for (const bad of [reserveProof.good.slice(0, -2), `0xff${reserveProof.good.slice(4)}`]) {
+      await assert.rejects(() => A.chain.call(lock(bad)), reverts('UnverifiedEvent'));
+    }
     await assert.rejects(() => A.chain.call(lock(reserveProof.duplicate)), reverts('UnverifiedEvent'));
     await assert.rejects(() => A.chain.call(lock(reserveProof.wrongConsumer)), reverts('UnverifiedEvent'));
     await assert.rejects(() => A.chain.call(lock(reserveProof.good, o, '0x')), reverts('InvalidStarkProof'));
@@ -268,12 +227,14 @@ test(`ETH → HYPE: ${generate ? 'fresh' : 'pinned'} STARKs, withdrawal-time pri
     // Counterfactual cancellation branch from the same pending state/real lock.
     assert(await A.chain.rpc('evm_revert', [snapA]));
     assert(await B.chain.rpc('evm_revert', [snapB]));
-    await A.setTime(o.payBy);
     await B.setTime(o.payBy);
-    await assert.rejects(() => A.chain.call(source.spec('refund', [o, '0x'])), reverts('UnverifiedEvent'));
     await assert.rejects(() => B.chain.call(pay()), reverts('WrongState'));
     const cancelled = await relayB.submit('cancel-cross-order', liquidity.spec('cancel', [o]));
     const cancelProof = await certificate(B, liquidity, cancelled, A, qa, source, 4, order);
+    // Destination reached its deadline first. A source refund still respects its own clock.
+    await assert.rejects(() => A.chain.call(source.spec('refund', [o, cancelProof.good])), reverts('WrongState'));
+    await A.setTime(o.payBy);
+    await assert.rejects(() => A.chain.call(source.spec('refund', [o, '0x'])), reverts('UnverifiedEvent'));
     await relayA.submit('refund-cross-order', source.spec('refund', [o, cancelProof.good]));
     assert.equal(await B.chain.balance(receiver.at), 0n);
     assert.equal(await B.chain.balance(B.manifest.dao.treasury), 0n);

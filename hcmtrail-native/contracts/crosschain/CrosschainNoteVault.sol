@@ -10,6 +10,7 @@ import {Goldilocks} from "../vendor/nonos/libraries/Goldilocks.sol";
 import {NativeExit} from "../vault/NativeVault.sol";
 import {NativeNoteTree} from "../vault/NativeNoteTree.sol";
 import {SpendGate} from "./SpendGate.sol";
+import {WithdrawalConfigPins} from "./WithdrawalConfigPins.sol";
 import {SpendGatePins} from "./SpendGatePins.sol";
 import {WithdrawalOrder, WithdrawalRate, WithdrawalTerms, IFinalizedEvents} from "./WithdrawalTerms.sol";
 
@@ -66,10 +67,11 @@ contract CrosschainNoteVault is NativeNoteTree {
         NativeNoteTree(keccak256(abi.encode("hcmtrail.crosschain-native-notes.v1", block.chainid, address(this), STARK_IMAGE)))
     {
         NativeAsset a = WithdrawalTerms.asset(block.chainid);
-        if (address(box).codehash != HcmtPins.treasury(a == NativeAsset.TRX) || box.homeChainId() != block.chainid
-            || address(prices).code.length == 0 || prices.oracleChainId() != block.chainid || prices.feeBps() != 0
-            || address(receipts).code.length == 0) revert BadConfig();
-        SpendGatePins.check(address(verifier), a == NativeAsset.TRX);
+        bool tvm = a == NativeAsset.TRX;
+        if (address(box).codehash != HcmtPins.treasury(tvm) || box.homeChainId() != block.chainid) revert BadConfig();
+        SpendGatePins.check(address(verifier), tvm);
+        WithdrawalConfigPins.checkOracle(prices, tvm);
+        WithdrawalConfigPins.checkQuorum(receipts, tvm);
         asset = a;
         homeChainId = block.chainid;
         custodyCap = a == NativeAsset.TRX ? uint256(uint64(type(int64).max)) : Goldilocks.MAX_VALUE;
@@ -130,10 +132,11 @@ contract CrosschainNoteVault is NativeNoteTree {
     function quote(WithdrawalOrder calldata o) public view returns (WithdrawalRate memory r, uint96 fee, uint96 net) {
         _source(o);
         WithdrawalTerms.acceptanceOpen(o);
-        ChainlinkPriceEpochs.Epoch memory e = oracle.activeEpoch();
-        r.epoch = e.id;
-        r.priceIn18 = e.rounds[uint8(asset)].price18;
-        r.priceOut18 = e.rounds[uint8(WithdrawalTerms.asset(o.destinationChain))].price18;
+        ChainlinkPriceEpochs.Round memory input;
+        ChainlinkPriceEpochs.Round memory output;
+        (r.epoch, input, output) = oracle.currentPair(asset, WithdrawalTerms.asset(o.destinationChain));
+        r.priceIn18 = input.price18;
+        r.priceOut18 = output.price18;
         r.acceptedAt = uint64(block.timestamp);
         (r.grossOut, fee, net) = WithdrawalTerms.payout(o, r.priceIn18, r.priceOut18);
     }
@@ -184,7 +187,7 @@ contract CrosschainNoteVault is NativeNoteTree {
         _source(o);
         bytes32 id = WithdrawalTerms.id(o);
         Escrow storage e = escrows[id];
-        if (e.status != LOCKED) revert WrongState();
+        if (e.status != LOCKED || block.timestamp < o.payBy) revert WrongState();
         WithdrawalTerms.authenticated(finality, o.destinationChain, o.destinationVault, WithdrawalTerms.CANCELLED,
             id, bytes32(0), cancellation);
         e.status = REFUNDED;

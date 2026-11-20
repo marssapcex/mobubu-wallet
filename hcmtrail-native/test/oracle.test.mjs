@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { AbiCoder, id, sha256, toUtf8Bytes } from 'ethers';
+import { AbiCoder, id, keccak256, sha256, toUtf8Bytes } from 'ethers';
 import { AGE, ANSWERS, ASSETS, EVM_MAX, FEE, GRACE, MAX_PRICE, NO_EPOCH, PRICES18, SKEW, SUN_MAX, UNITS,
   ZERO, exactQuote, localEvm, setup } from './local-evm.mjs';
 
@@ -24,7 +24,7 @@ test('one immutable, nonpayable oracle; exactly four native assets and no caller
   assert.equal((await f.oracle.publishedEpoch()).id, NO_EPOCH);
   await expectRevert(f.oracle.activeEpoch(), 'NoEpoch');
   const names = f.artifact.abi.filter((e) => e.type === 'function').map((e) => e.name).sort();
-  assert.deepEqual(names, ['activeEpoch', 'feeBps', 'feedConfig', 'maxTimestampSkew', 'nativeAssetInfo', 'oracleChainId',
+  assert.deepEqual(names, ['activeEpoch', 'currentPair', 'feeBps', 'feedConfig', 'maxTimestampSkew', 'nativeAssetInfo', 'oracleChainId',
     'oracleDomain', 'publishedEpoch', 'quote', 'refresh', 'sequencerFeed', 'sequencerGrace']);
   assert.ok(f.artifact.abi.every((e) => e.stateMutability !== 'payable'));
   assert.equal(f.oracle.interface.getFunction('refresh').inputs.length, 0);
@@ -193,4 +193,32 @@ test('optional L2 uptime feed blocks downtime, grace period and pre-recovery quo
   for (let i = 0; i < f.feeds.length; i++) await f.report(f.feeds[i], 11, ANSWERS[i], recovered);
   await emitEpoch(f.oracle);
   assert.notEqual((await f.oracle.activeEpoch()).id, before.id);
+});
+
+test('currentPair is ordered and domain-bound; only either selected feed can block a new quote', async (t) => {
+  const f = await testFixture(t);
+  const initial = await f.oracle.currentPair(0, 3);
+  const tag = id('hcmtrail.native.live-price-pair.v1');
+  const domain = await f.oracle.oracleDomain();
+  const pairId = (src, dst, a, b) => keccak256(AbiCoder.defaultAbiCoder().encode(['bytes32', 'bytes32', 'uint8', 'uint8', 'tuple(uint80,uint80,uint64)', 'tuple(uint80,uint80,uint64)'],
+    [tag, domain, src, dst, a, b]));
+  const [observation, input, output] = initial;
+  assert.equal(observation, pairId(0, 3, input, output));
+  assert.equal((await f.oracle.currentPair(3, 0)).observation, pairId(3, 0, output, input));
+  assert.notEqual((await f.oracle.currentPair(3, 0)).observation, observation);
+  assert.equal((await f.oracle.publishedEpoch()).id, NO_EPOCH);
+  await (await f.feeds[2].setOffline(true)).wait();
+  assert.equal((await f.oracle.currentPair(0, 3)).observation, observation);
+  await expectRevert(f.oracle.currentPair(0, 2), 'NO_DATA');
+  await expectRevert(f.oracle.currentPair(3, 3), 'SameAsset');
+  await f.report(f.feeds[3], 11, ANSWERS[3] * 2n, await f.timestamp());
+  const fresh = await f.oracle.currentPair(0, 3);
+  assert.notEqual(fresh.observation, observation);
+  assert.equal(fresh.output.price18, PRICES18[3] * 2n);
+  assert.equal((await f.oracle.publishedEpoch()).id, NO_EPOCH);
+  await f.report(f.feeds[3], 12, ANSWERS[3], f.start - SKEW - 1);
+  await expectRevert(f.oracle.currentPair(0, 3), 'TimestampSkew');
+  await f.report(f.feeds[3], 13, ANSWERS[3], f.start);
+  await f.setTime(f.start + AGE);
+  await expectRevert(f.oracle.currentPair(0, 3), 'StaleRound');
 });

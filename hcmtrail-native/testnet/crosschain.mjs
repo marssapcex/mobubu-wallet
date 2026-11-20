@@ -14,7 +14,7 @@ export const orderId = (order) => keccak256(abi.encode(['bytes32', orderType], [
 export const rateHash = (rate) => keccak256(abi.encode([rateType], [rate]));
 const coin = (chainId) => Object.values(TESTNETS).find((n) => n.chainId === BigInt(chainId));
 
-// Local price preview only; final order lock reads activeEpoch() at execution.
+// Local price preview only; final order lock reads currentPair() at execution.
 export function previewOrder(order, input18, output18) {
   const src = coin(order.sourceChain), dst = coin(order.destinationChain);
   const input = BigInt(input18), output = BigInt(output18), amount = BigInt(order.amountIn);

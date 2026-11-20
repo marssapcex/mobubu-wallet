@@ -25,7 +25,7 @@ struct WithdrawalOrder {
 }
 
 struct WithdrawalRate {
-    bytes32 epoch;
+    bytes32 epoch; // Source oracle observation ID (ordered pair of current rounds).
     uint80 priceIn18;
     uint80 priceOut18;
     uint64 acceptedAt;
@@ -98,7 +98,10 @@ library WithdrawalTerms {
     function authenticated(IFinalizedEvents verifier, uint256 chain, address emitter, uint8 kind, bytes32 order,
         bytes32 data, bytes calldata proof) internal view
     {
-        if (!verifier.proves(chain, emitter, kind, order, data, proof)) revert UnverifiedEvent();
+        try verifier.proves(chain, emitter, kind, order, data, proof) returns (bool valid) {
+            if (valid) return;
+        } catch {} // A malformed certificate (including noncanonical ABI words) fails closed.
+        revert UnverifiedEvent();
     }
 
     error UnverifiedEvent();

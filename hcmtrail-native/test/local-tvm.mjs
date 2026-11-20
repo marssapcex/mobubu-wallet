@@ -52,6 +52,13 @@ export async function localTvm({ chainId = TRON_ID, now = TVM_NOW, funded = [TVM
       await tvm.stateManager.checkpoint();
       try { return await run(opts); } finally { await tvm.stateManager.revert(); }
     },
+    async chargeFixtureFee(at, amount) {
+      const who = address(at);
+      const account = await tvm.stateManager.getAccount(who);
+      assert(account && amount >= 0n && account.balance >= amount, 'TVM fixture account cannot cover the modeled fee.');
+      account.balance -= amount;
+      await tvm.stateManager.putAccount(who, account);
+    },
     balance: async (at) => (await tvm.stateManager.getAccount(address(at)))?.balance ?? 0n,
   };
 }

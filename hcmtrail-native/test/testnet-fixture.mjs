@@ -30,8 +30,8 @@ export async function evmFixture(asset, { chainId = TESTNETS[asset].chainId } = 
   return { chain, vm, status, signerChain, setTime, close: () => vm.close() };
 }
 
-export async function walletFixture(asset, report = () => {}, { dao = false } = {}) {
-  const transport = asset === 'TRX' ? await (await import('./testnet-nile-fixture.mjs')).nileFixture() : await evmFixture(asset);
+export async function walletFixture(asset, report = () => {}, { dao = false, nile = {} } = {}) {
+  const transport = asset === 'TRX' ? await (await import('./testnet-nile-fixture.mjs')).nileFixture(nile) : await evmFixture(asset);
   const root = mkdtempSync(join(tmpdir(), `hcmtrail-testnet-${asset}-`));
   const close = () => { transport.close(); rmSync(root, { recursive: true, force: true }); };
   try {

@@ -33,6 +33,7 @@ contract ChainlinkPriceEpochs {
     }
 
     bytes32 private constant DOMAIN_TAG = sha256("hcmtrail.native.price-epochs.v1");
+    bytes32 private constant PAIR_TAG = keccak256("hcmtrail.native.live-price-pair.v1");
     uint256 public immutable oracleChainId;
     bytes32 public immutable oracleDomain;
     uint32 public immutable maxTimestampSkew;
@@ -139,6 +140,20 @@ contract ChainlinkPriceEpochs {
         if (_epochId(latest, validUntil) != current.id) revert EpochChanged();
     }
 
+    /// @notice Two current rounds for a new withdrawal. No keeper or other asset's feed is required.
+    /// @dev The observation ID identifies this ordered pair, not a published four-feed epoch or a remote proof.
+    function currentPair(NativeAsset src, NativeAsset dst)
+        external view returns (bytes32 observation, Round memory input, Round memory output)
+    {
+        if (src == dst) revert NativeAssets.SameAsset();
+        (uint256 nowAt, uint256 recoveredAt) = _clock();
+        (input,) = _readOne(src, nowAt, recoveredAt);
+        (output,) = _readOne(dst, nowAt, recoveredAt);
+        uint64 skew = input.updatedAt > output.updatedAt ? input.updatedAt - output.updatedAt : output.updatedAt - input.updatedAt;
+        if (skew > maxTimestampSkew) revert TimestampSkew();
+        observation = keccak256(abi.encode(PAIR_TAG, oracleDomain, src, dst, input, output));
+    }
+
     /// @notice Reference math only. Do not send a private debit/minOut here or to a public RPC.
     function quote(bytes32 expectedEpoch, NativeAsset src, NativeAsset dst, uint256 debit, uint256 minOut)
         external view returns (uint256 payout)
@@ -154,11 +169,15 @@ contract ChainlinkPriceEpochs {
         return sha256(abi.encode(oracleDomain, validUntil, rounds));
     }
 
-    function _readAll() private view returns (Round[4] memory rounds, uint64 expiry) {
+    function _clock() private view returns (uint256 nowAt, uint256 recoveredAt) {
         if (block.chainid != oracleChainId) revert WrongChain();
-        uint256 nowAt = block.timestamp;
+        nowAt = block.timestamp;
         if (nowAt == 0 || nowAt > type(uint64).max - type(uint32).max) revert BadClock();
-        uint256 recoveredAt = _recoverTime(nowAt);
+        recoveredAt = _recoverTime(nowAt);
+    }
+
+    function _readAll() private view returns (Round[4] memory rounds, uint64 expiry) {
+        (uint256 nowAt, uint256 recoveredAt) = _clock();
         uint64 oldest = type(uint64).max;
         uint64 newest;
         expiry = type(uint64).max;

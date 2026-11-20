@@ -57,9 +57,11 @@ jobs:
         run: |
           export TRON_SOLC="$RUNNER_TEMP/tron-solc"
           npm run test:stake
-      - name: Settle a sponsored ETH to HYPE withdrawal in two VMs and check the Nile profile
+      - name: Replay sponsored native withdrawals across the four EVM and TVM test domains
         run: |
           export TRON_SOLC="$RUNNER_TEMP/tron-solc"
+          npm run build:crosschain -- --check-config-pins
           npm run build:crosschain
           npm run build:crosschain -- --tvm
           npm run test:crosschain
+          npm run test:crosschain:four

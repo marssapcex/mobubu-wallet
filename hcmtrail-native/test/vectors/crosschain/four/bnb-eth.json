@@ -1,0 +1,16 @@
+{
+  "id": "0x754ebc4761bf6883a36880c9e4a0c6380d73a29c6f9fe454e020285335bd746a",
+  "proofId": "0x4b4ccbaabbe6e14e77ecaf6b232d4e848d61683b32f4ab7f141b27fe887ced94",
+  "publicSpend": {
+    "root": "0x5eb1398cdb76e04132ad306cf1162f185582a57c9de70d27e225538b10ba3aa8",
+    "nullifiers": [
+      "0x68fc41a7e9e95f3bdd5bf6c1c03dfbced74d7ef63e7a23e152cfa72741d67c39",
+      "0x248ad38f615f57d995480b0a7c059553cd6669895117215d6d3bed522a20ffd8"
+    ],
+    "change": [
+      "0x05ab531f514e2a3eea9d747f9865ac483ebc0d4e2bc3147749b90864c2ede2a0",
+      "0x9712c2d31771e246a80c816903ede280810a00a2a333b0efa13b10856006a43b"
+    ],
+    "notBefore": "1796100000"
+  }
+}

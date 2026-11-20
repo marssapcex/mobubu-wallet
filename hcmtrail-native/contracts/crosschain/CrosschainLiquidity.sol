@@ -4,6 +4,7 @@ pragma solidity 0.8.24;
 import {NativeAsset, NativeAssets} from "../NativeAssets.sol";
 import {HcmtPins} from "../dao/HcmtPins.sol";
 import {HcmtTreasury} from "../dao/HcmtTreasury.sol";
+import {WithdrawalConfigPins} from "./WithdrawalConfigPins.sol";
 import {WithdrawalOrder, WithdrawalRate, WithdrawalTerms, IFinalizedEvents} from "./WithdrawalTerms.sol";
 
 /// @notice One immutable inbound route. LP inventory is completely separate from local custody notes.
@@ -37,8 +38,10 @@ contract CrosschainLiquidity {
 
     constructor(uint256 fromChain, address fromVault, HcmtTreasury box, IFinalizedEvents receipts) {
         NativeAsset a = WithdrawalTerms.asset(block.chainid);
-        if (WithdrawalTerms.asset(fromChain) == a || fromVault == address(0) || address(receipts).code.length == 0
-            || address(box).codehash != HcmtPins.treasury(a == NativeAsset.TRX) || box.homeChainId() != block.chainid) revert BadConfig();
+        bool tvm = a == NativeAsset.TRX;
+        if (WithdrawalTerms.asset(fromChain) == a || fromVault == address(0) || address(box).codehash != HcmtPins.treasury(tvm)
+            || box.homeChainId() != block.chainid) revert BadConfig();
+        WithdrawalConfigPins.checkQuorum(receipts, tvm);
         homeChainId = block.chainid;
         sourceChain = fromChain;
         transferCap = NativeAssets.ceiling(a);
@@ -64,6 +67,7 @@ contract CrosschainLiquidity {
     function withdrawLiquidity(uint256 amount, address payable to) external guard {
         if (amount == 0 || amount > transferCap || amount > freeLiquidity[msg.sender]
             || to == address(0) || to == address(this)) revert InsufficientLiquidity();
+        _requireSolvent();
         freeLiquidity[msg.sender] -= amount;
         availableNative -= amount;
         _pay(to, amount);
@@ -74,7 +78,8 @@ contract CrosschainLiquidity {
         id = _order(o);
         WithdrawalTerms.acceptanceOpen(o);
         if (msg.sender != o.destinationLP || status[id] != 0) revert WrongState();
-        if (o.liquidityLimit > freeLiquidity[msg.sender] || address(this).balance < availableNative + reservedNative) revert InsufficientLiquidity();
+        if (o.liquidityLimit > freeLiquidity[msg.sender]) revert InsufficientLiquidity();
+        _requireSolvent();
         freeLiquidity[msg.sender] -= o.liquidityLimit;
         availableNative -= o.liquidityLimit;
         reservedNative += o.liquidityLimit;
@@ -86,6 +91,7 @@ contract CrosschainLiquidity {
     function pay(WithdrawalOrder calldata o, WithdrawalRate calldata rate, bytes calldata lockProof) external guard {
         bytes32 id = _order(o);
         if (status[id] != RESERVED || block.timestamp >= o.payBy) revert WrongState();
+        _requireSolvent();
         (uint96 gross, uint96 levy, uint96 net) = WithdrawalTerms.payout(o, rate.priceIn18, rate.priceOut18);
         if (rate.grossOut != gross || rate.epoch == bytes32(0) || rate.acceptedAt == 0 || rate.acceptedAt >= o.acceptBy) revert WrongQuote();
         bytes32 data = keccak256(abi.encode(rate));
@@ -112,6 +118,10 @@ contract CrosschainLiquidity {
         if (o.sourceChain != sourceChain || o.sourceVault != sourceVault || o.destinationChain != homeChainId
             || o.destinationVault != address(this) || o.recipient == address(treasury)) revert BadConfig();
         return WithdrawalTerms.id(o);
+    }
+
+    function _requireSolvent() private view {
+        if (address(this).balance < availableNative + reservedNative) revert InsufficientLiquidity();
     }
 
     function _free(WithdrawalOrder calldata o, uint256 surplus) private {

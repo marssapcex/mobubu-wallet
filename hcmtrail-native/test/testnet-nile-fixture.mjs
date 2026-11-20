@@ -14,7 +14,7 @@ const q = toQuantity;
 
 // Isolated in-process transport. Verifies TRON protobuf/TAPOS construction and runs the bytecode;
 // cannot model public nodes' fee resource accounting, CPU deadlines, or confirmation delays.
-export async function nileFixture({ chainId = TESTNETS.TRX.chainId } = {}) {
+export async function nileFixture({ chainId = TESTNETS.TRX.chainId, modelFees = false } = {}) {
   const net = TESTNETS.TRX;
   const vm = await localTvm({ chainId, funded: [DEMO_SENDER, DEMO_RECIPIENT] });
   let head = 100n;
@@ -26,6 +26,7 @@ export async function nileFixture({ chainId = TESTNETS.TRX.chainId } = {}) {
     times.set(++head, time);
     return block(head);
   }
+  const sunPerUnit = modelFees ? 1 : 100;
   const flags = { holdSolid: false, foreignTapos: false, noEnergy: false };
   const txs = new Map();
   const rows = [];
@@ -46,8 +47,8 @@ export async function nileFixture({ chainId = TESTNETS.TRX.chainId } = {}) {
         number: Number(BigInt(b.number)), timestamp: Number(BigInt(b.timestamp) * 1_000n),
       } } };
     }
-    if (method === 'wallet/getchainparameters') return { chainParameter: [{ key: 'getEnergyFee', value: 100 }] };
-    if (method === 'wallet/getaccountresource') return { EnergyLimit: 30_000_000, EnergyUsed: 0 };
+    if (method === 'wallet/getchainparameters') return { chainParameter: [{ key: 'getEnergyFee', value: sunPerUnit }] };
+    if (method === 'wallet/getaccountresource') return { EnergyLimit: modelFees ? 0 : 30_000_000, EnergyUsed: 0 };
     if (method.endsWith('/triggerconstantcontract')) {
       const value = BigInt(args.call_value);
       const opts = { from: fromTron(args.owner_address), timestamp: BigInt(block(method.startsWith('walletsolidity') ? solid() : head).timestamp) };
@@ -74,6 +75,13 @@ export async function nileFixture({ chainId = TESTNETS.TRX.chainId } = {}) {
       const result = to ? await vm.run({ ...opts, to: createAddressFromString(to), value: BigInt(p.call_value ?? 0), data: getBytes(`0x${p.data}`) })
         : await vm.deployRaw({ abi: [], bytecode: `0x${p.new_contract.bytecode}` }, [], opts);
       const r = result.execResult;
+      // An opt-in, synthetic one-sun/VM-unit fee. It checks separation of signer funds
+      // from native value, not Java-Tron billing, Bandwidth or real Energy pricing.
+      const fee = modelFees ? r.executionGasUsed * BigInt(sunPerUnit) : 0n;
+      if (modelFees) {
+        assert(fee <= BigInt(tx.raw_data.fee_limit));
+        await vm.chargeFixtureFee(owner, fee);
+      }
       const created = !to && result.createdAddress ? getAddress(result.createdAddress.toString()) : to;
       if (!to && created) assert.equal(toTron(created), tx.contract_address.toLowerCase());
       const contractRet = r.exceptionError ? 'REVERT' : 'SUCCESS';
@@ -82,7 +90,7 @@ export async function nileFixture({ chainId = TESTNETS.TRX.chainId } = {}) {
         blockNumber: b.number, blockHash: b.hash, transactionHash: txId, logIndex: q(i) }));
       rows.push(...logs);
       txs.set(txId, { tx, info: { id: tx.txID, blockNumber: Number(head), contract_address: created ? toTron(created) : undefined,
-        result: r.exceptionError ? 'FAILED' : undefined, fee: 0,
+        result: r.exceptionError ? 'FAILED' : undefined, fee: Number(fee),
         receipt: { result: contractRet, energy_usage_total: Number(r.executionGasUsed), net_usage: tx.raw_data_hex.length / 2 },
         log: logs.map((l) => ({ address: l.address.slice(2).toLowerCase(), topics: l.topics.map((t) => t.slice(2)), data: l.data.slice(2) })),
       } });
