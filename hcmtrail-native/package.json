@@ -1,7 +1,7 @@
 {
   "name": "hcmtrail-native-oracle-lab",
   "version": "0.1.0",
-  "description": "Four native STARK vaults, STARK-authorized HCMT staking, and standalone Chainlink epochs; testnet only",
+  "description": "Native STARK vaults, HCMT staking, and withdrawal-time cross-chain quotes/settlement devnet",
   "private": true,
   "type": "module",
   "engines": {
@@ -25,7 +25,10 @@
     "test:dao": "node --test --test-concurrency=1 test/dao.test.mjs",
     "test:dao:fresh": "node --test --test-concurrency=1 test/dao-fresh.test.mjs",
     "test:stake": "node --test --test-concurrency=1 test/staking.test.mjs",
-    "test:stake:fresh": "NATIVE_STAKE_GENERATE=1 node --test --test-concurrency=1 test/staking.test.mjs"
+    "test:stake:fresh": "NATIVE_STAKE_GENERATE=1 node --test --test-concurrency=1 test/staking.test.mjs",
+    "build:crosschain": "node scripts/build-crosschain.mjs",
+    "test:crosschain": "node --test --test-concurrency=1 test/crosschain.test.mjs",
+    "test:crosschain:fresh": "NATIVE_CROSSCHAIN_GENERATE=1 node --test --test-concurrency=1 test/crosschain.test.mjs"
   },
   "devDependencies": {
     "@nomicfoundation/edr": "0.25.1",

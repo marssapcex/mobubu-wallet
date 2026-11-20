@@ -1,6 +1,6 @@
 # Đặc tả trước khi nhận tiền: pool và swap riêng tư
 
-**Trạng thái:** đây là điều kiện nghiệm thu cho *swap liên mạng*, không phải mô tả một mixer đã chạy. [Bốn vault thử nghiệm](VAULTS.md) chỉ nạp/rút native nội mạng qua STARK. Báo giá có thể tính riêng trong ví từ snapshot giá công khai, không cấp quyền chi note. Chưa có proof đổi giá ràng buộc vào debit, dự trữ, bridge hoặc cấu hình triển khai công khai.
+**Trạng thái:** đây là điều kiện nghiệm thu cho *cross-chain riêng tư và không dựa vào chữ ký operator*, không phải chứng nhận production. [Bốn vault gốc](VAULTS.md) chỉ nạp/rút native nội mạng. [Profile cross-chain devnet](CROSSCHAIN-WITHDRAWAL.md) thực thi giá rút, phí DAO, reserve và trả/hoàn tiền bằng STARK nguồn + adapter log 2/3 witness. Chưa có finality verifier độc lập, batch ẩn tuyến hay triển khai công khai.
 
 ## 1. Tách định giá, quyền chi, dự trữ và finality
 
@@ -16,7 +16,7 @@ Nguồn phải chấp nhận root được ghi bởi pool canonical. Witness ri�
 Proof cần kiểm đồng thời:
 
 1. Note thuộc root, trị giá được bảo chứng, người tạo proof có quyền chi. Nullifier nguồn được dẫn xuất ổn định từ note/domain và khóa chi, **không đổi theo đích hay kiểu swap**. Nguồn tiêu thụ cùng một nullifier đối với rút nội bộ hoặc liên mạng. Sau khi trừ, change được tạo đúng bằng `noteValue - debit` và không thể lặp/cấp thêm.
-2. `0 < debit <= noteValue`. Các amounts và giá phải đúng miền/số nguyên; circuit phải range-check các limb/carry, không dùng đẳng thức modulo field để thay số học integer. Gọi `N = debit × USD18[src] × units[dst] × (10000 − feeBps)` và `D = USD18[dst] × units[src] × 10000`. Ép `D > 0`, `N = out × D + remainder`, `0 <= remainder < D`, `0 < out <= cap(dst)`, `out >= minOut` và `out <= reserved`. Đây là cùng phép floor như Solidity; cộng một wei hay một sun phải không verify được.
+2. `0 < debit <= noteValue`. Các amounts và giá phải đúng miền/số nguyên; circuit phải range-check các limb/carry, không dùng đẳng thức modulo field để thay số học integer. Gọi `N = debit × USD18[src] × units[dst]` và `D = USD18[dst] × units[src]`. Ép `D > 0`, `N = gross × D + remainder`, `0 <= remainder < D`, `0 < gross <= cap(dst)`, `gross <= reserved`. Theo chính sách HCMT, tính riêng `levy = floor(gross/400)` rồi `net = gross − levy >= minOut`; debit đã là số ròng nguồn, không trừ lại phí nạp. Đây là cùng phép floor như Solidity; cộng một wei hay một sun phải không verify được.
 3. Đích chỉ được phát hành quyền claim được cam kết trong batch nguồn đã finalized, đúng domain, và mỗi claim nullifier chỉ dùng một lần. Phải chứng minh liên kết mật giữa giao dịch trao đổi và note đích, không phụ thuộc chữ ký của nhà vận hành. Ngăn reserve được dùng hai lần và nghĩa vụ tổng vượt tồn kho ngay cả khi nhiều batch đến đồng thời. Hash chỉ có ý nghĩa khi prover **kiểm cách tạo hash và các giá trị nó ràng buộc**.
 4. Không tự hoàn vì timeout RPC, hết hạn hay không thấy biên nhận. Tách hạn nhận lệnh, thời gian finality và hạn payout. Trước khi khấu trừ không đảo ngược cần dự trữ được khóa đủ lâu, hoặc cơ chế hoàn dựa trên bằng chứng trạng thái cuối đã vô hiệu hóa quyền trả ở đích. Không coi một relay ACK hoặc thiếu event là bằng chứng. Chưa chọn/chứng minh giao thức nguyên tử bốn mạng.
 
