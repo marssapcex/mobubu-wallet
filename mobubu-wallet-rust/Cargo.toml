@@ -1,0 +1,9 @@
+[package]
+name = "mobubu-wallet"
+version = "0.2.0"
+edition = "2021"
+rust-version = "1.88"
+publish = false
+
+[dependencies]
+substrate-bn = "=0.6.0"

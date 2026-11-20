@@ -1,0 +1,42 @@
+{
+  "name": "fhe-swap",
+  "version": "0.2.0",
+  "description": "Local CGGI and BFV experiments and a mock-chain streaming swap simulator",
+  "type": "module",
+  "main": "dist/src/index.js",
+  "types": "dist/src/index.d.ts",
+  "engines": {
+    "node": ">=22.13.0"
+  },
+  "scripts": {
+    "build": "node -e \"require('node:fs').rmSync('dist', { recursive: true, force: true })\" && tsc -p tsconfig.json",
+    "test": "npm run build:native && npm run test:built",
+    "demo": "npm run build && node dist/src/cli-streaming.js",
+    "demo:bfv": "npm run build && node dist/src/cli-bfv.js",
+    "fetch:upstreams": "bash scripts/fetch-upstreams.sh",
+    "build:native": "bash scripts/build-tfhe.sh",
+    "test:built": "npm run build && node --test \"dist/test/**/*.test.js\"",
+    "bench:tfhe": "npm run build && node dist/bench/compare-tfhe.js"
+  },
+  "keywords": [
+    "fhe",
+    "homomorphic-encryption",
+    "cross-chain",
+    "swap",
+    "thorchain",
+    "serai",
+    "bitcoin",
+    "ethereum",
+    "bnb-smart-chain",
+    "privacy"
+  ],
+  "license": "MIT",
+  "dependencies": {
+    "node-seal": "^7.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.9.0",
+    "typescript": "^5.6.3"
+  },
+  "private": true
+}

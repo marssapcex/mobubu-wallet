@@ -33,3 +33,19 @@ npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 pnpm-debug.log*
+
+# Reproducible local tooling and proof artifacts
+proofs/**/target/
+.cache/
+/artifacts/
+/cache/
+*.key
+*.ptau
+*.wtns
+*.zkey
+
+# Custody journals and local operator configuration
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal
+/private/

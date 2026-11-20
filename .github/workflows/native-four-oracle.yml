@@ -1,0 +1,69 @@
+name: Four native STARK vaults, HCMT staking and oracle
+
+on:
+  push:
+    paths:
+      - 'hcmtrail-native/**'
+      - '.github/workflows/native-four-oracle.yml'
+  pull_request:
+    paths:
+      - 'hcmtrail-native/**'
+      - '.github/workflows/native-four-oracle.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  isolated-oracle:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: hcmtrail-native
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: hcmtrail-native/package-lock.json
+      - run: npm ci --ignore-scripts
+      - run: npm audit --audit-level=moderate
+      - run: npm run build && npm test
+      - name: Verify checkpoint ancestry and ETH/BSC receipt inclusion without signatures
+        run: npm run build:receipt-proof && npm run test:receipt-proof
+      - name: Replay funded native STARK withdrawals on EVM
+        run: npm run build:vault && npm run test:vault
+      - name: Execute oracle and funded native STARK withdrawal on TVM
+        run: |
+          bash scripts/fetch-tron-solc.sh "$RUNNER_TEMP/tron-solc"
+          export TRON_SOLC="$RUNNER_TEMP/tron-solc"
+          npm run test:tvm
+          npm run build:vault -- --tvm
+          npm run test:vault:tvm
+      - name: Check four testnet domains, local signing and confirmed note recovery
+        run: |
+          export TRON_SOLC="$RUNNER_TEMP/tron-solc"
+          npm run build:testnet
+          npm run build:testnet -- --tvm
+          npm run test:testnet
+      - name: Build four HCMT fee vaults and exercise monthly accounting and relay guards
+        run: |
+          export TRON_SOLC="$RUNNER_TEMP/tron-solc"
+          npm run build:dao
+          npm run build:dao -- --tvm
+          npm run test:dao
+      - name: Verify funded STARK staking refunds and claims on EVM and TVM
+        run: |
+          export TRON_SOLC="$RUNNER_TEMP/tron-solc"
+          npm run test:stake
+      - name: Replay sponsored native withdrawals across the four EVM and TVM test domains
+        run: |
+          export TRON_SOLC="$RUNNER_TEMP/tron-solc"
+          npm run build:crosschain -- --check-config-pins
+          npm run build:crosschain
+          npm run build:crosschain -- --tvm
+          npm run test:crosschain
+          npm run test:crosschain:four
