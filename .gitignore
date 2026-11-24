@@ -35,7 +35,6 @@ yarn-error.log*
 pnpm-debug.log*
 
 # Reproducible local tooling and proof artifacts
-proofs/**/target/
 .cache/
 /artifacts/
 /cache/

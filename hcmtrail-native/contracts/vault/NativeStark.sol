@@ -27,38 +27,41 @@ abstract contract NativeStark {
     error WrongStarkCode();
     error InvalidStarkProof();
 
-    constructor(bool tvm, address prepare, address walk, address[3] memory chunks) {
-        _pin(tvm, prepare, walk);
-        address[] memory at = new address[](3);
-        for (uint256 i; i < at.length; ++i) at[i] = chunks[i];
-        // The generated evaluator checks the runtime hash of each of its three chunks.
-        starkEvaluator = new NbStraightEvaluatorAt(at);
+    constructor(address prepare, address walk, address evaluator) {
+        if (prepare.codehash != 0x9a9a87266bcc6253f97643a698561d7a769d3b7df3c059ff9a349ba5b217be5f) {
+            revert WrongStarkCode();
+        }
+        bytes memory code = walk.code;
+        if (code.length != 21_199 || _extract(code, 64, 167) != prepare
+            || keccak256(code) != 0x93b3da94ead31c3d9510d732cdf01b6099fd464641d32665af821fe0f7750077) {
+            revert WrongStarkCode();
+        }
+        // Deploy the evaluator separately so all pool initcodes stay below EIP-3860.
+        // Pin the exact template AND all six address words, not a getter response.
+        code = evaluator.code;
+        if (code.length != 22_940
+            || _extract(code, 194, 449).codehash != 0x93287206aec4bcb328581607e3ee57364acfcbdeccf88b2a1f7c18cbd4e86769
+            || _extract(code, 278, 486).codehash != 0x49c63cd661201d82ac248b39a760fb592ebb5cc8f50e51f9d9763870cb61ccf8
+            || _extract(code, 362, 523).codehash != 0x58ecbd2cdd3c419089384ec5a2a57e18e45baa881231ac9e07e6a4f554d3f63c
+            || keccak256(code) != 0xe7895b809e2fe25b276957d7d48fcbcabddd1ce4b52b2ad6e12beffbb66d47d5) {
+            revert WrongStarkCode();
+        }
+        starkEvaluator = NbStraightEvaluatorAt(evaluator);
         starkWalk = WalkNb_A(walk);
     }
 
-    /// @dev The two immutable words must equal the *pinned* prepare address. The hash of
-    /// the rest of the code must be that of the exact generated walk, not a contract that
-    /// merely reports the same metadata. Regenerate pins via build-vault.mjs --pins.
-    function _pin(bool tvm, address prepare, address walk) private view {
-        bytes32 prepHash = tvm
-            ? bytes32(0x920b3caf49a04f033c1c047a38f14a38d157515c43778245267f67b1d42a9e84)
-            : bytes32(0x9a9a87266bcc6253f97643a698561d7a769d3b7df3c059ff9a349ba5b217be5f);
-        bytes32 walkHash = tvm
-            ? bytes32(0x87a96a0fb2fcb43ecf51e81567fb13ac75eac791da11ab386177c05c3e9473ad)
-            : bytes32(0x93b3da94ead31c3d9510d732cdf01b6099fd464641d32665af821fe0f7750077);
-        (uint256 length, uint256 first, uint256 second) = tvm ? (21242, 90, 193) : (21199, 64, 167);
-        if (prepare.codehash != prepHash || walk.code.length != length) revert WrongStarkCode();
-        bytes memory code = walk.code;
-        bool linked;
+    function _extract(bytes memory code, uint256 first, uint256 second) private pure returns (address linked) {
+        uint256 a;
+        uint256 b;
         assembly ("memory-safe") {
-            let a := add(add(code, 32), first)
-            let b := add(add(code, 32), second)
-            let expected := and(prepare, 0xffffffffffffffffffffffffffffffffffffffff)
-            linked := and(eq(mload(a), expected), eq(mload(b), expected))
-            mstore(a, 0)
-            mstore(b, 0)
+            let p := add(code, 32)
+            a := mload(add(p, first))
+            b := mload(add(p, second))
+            mstore(add(p, first), 0)
+            mstore(add(p, second), 0)
         }
-        if (!linked || keccak256(code) != walkHash) revert WrongStarkCode();
+        if (a != b || a > type(uint160).max) revert WrongStarkCode();
+        linked = address(uint160(a));
     }
 
     function _verifyStark(bytes calldata proof, uint256[] memory limbs) internal view {

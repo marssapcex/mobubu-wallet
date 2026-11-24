@@ -1,5 +1,7 @@
 # hcmtrail: Equal-Amount Batch Withdrawals Across Four Chains
 
+> **Historical paper for the retired multi-asset design.** The current implementation is the [ETH-only pool lab](ETH-POOL.md).
+
 hcmtrail · November 2026
 
 [Read the PDF](whitepaper/hcmtrail-whitepaper-en.pdf)

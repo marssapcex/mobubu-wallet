@@ -1,0 +1,76 @@
+import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import { test } from 'node:test';
+import { parseEther, toBeHex } from 'ethers';
+import { deployEthPool } from '../pool/local.mjs';
+import { ETH, decodeNoteKey, directLeg, encodeNoteKey, parseProver, poolDomain, prepareProof, privateBackup, quoteFee,
+  readBackup, validateProof } from '../pool/protocol.mjs';
+import { readPool } from '../pool/view.mjs';
+import { proveInWasm } from '../pool/wasm.mjs';
+import { TX_GAS_CAP } from '../testnet/networks.mjs';
+import * as codec from '../testnet/notes.mjs';
+
+const opts = { gasLimit: TX_GAS_CAP };
+const send = async (f, ...a) => (await f(...a, opts)).wait();
+
+test('Base VM: recover from text note key, verify a real WASM STARK, withdraw ETH and claim exact monthly fees', { timeout: 1_800_000 }, async (t) => {
+  const wasm = readFileSync(new URL('../build/eth-pool/prover.wasm', import.meta.url));
+  const cache = process.env.POOL_PERIODIC_CACHE ? readFileSync(process.env.POOL_PERIODIC_CACHE) : undefined;
+  const vm = await deployEthPool({ chainId: 31339n });
+  t.after(vm.close);
+  const { pool, token, staking, provider } = vm;
+  const user = await provider.getSigner(1);
+  const owner = await user.getAddress();
+  const end = await staking.start();
+  const period = await staking.PERIOD();
+  const at = async (epoch) => {
+    await provider.send('evm_setNextBlockTimestamp', [Number(end + period * epoch)]);
+    await provider.send('evm_mine', []);
+  };
+  await send(token.mint, owner, 1n);
+  await send(token.connect(user).approve, staking.target, 1n);
+  await send(staking.connect(user).stake, 1n);
+  await at(1n);
+
+  const gross = parseEther('1') + 17n;
+  const deposit = quoteFee(gross);
+  const note = codec.openNote(ETH, deposit.net);
+  const context = { chainId: '31339', pool: pool.target, domain: poolDomain(31339n, pool.target) };
+  assert.equal(await pool.domain(), context.domain);
+  const key = encodeNoteKey(privateBackup(context, [note]));
+  await (await pool.deposit(note.ownerCommit, { ...opts, value: gross })).wait();
+  assert.equal(await pool.shieldedNative(), deposit.net);
+  assert.equal(await staking.fundedWei(), deposit.fee);
+
+  const [restored] = readBackup(decodeNoteKey(key), context, codec).notes;
+  const state = await readPool(pool, provider, vm.fromBlock, { snapshot: true });
+  assert.equal(codec.rebuildRoot(state.leaves), state.root);
+  const recipient = toBeHex(0xec201n, 20);
+  const expected = quoteFee(restored.value);
+  const withdraw = pool.connect(user).withdraw;
+  const plan = prepareProof(codec, state, { note: restored, index: state.leaves.indexOf(restored.leaf) },
+    directLeg(recipient, restored.value, staking.target));
+  const result = await proveInWasm(wasm, plan, { cache });
+  const spend = validateProof(codec, plan, result.proof, parseProver(result.publicAndChange));
+  assert.equal(spend.change.length, 0);
+  await assert.rejects(withdraw.staticCall(spend.proof, spend.spend, toBeHex(0xec202n, 20), restored.value));
+  await assert.rejects(withdraw.staticCall(spend.proof, spend.spend, recipient, restored.value - 1n));
+  const receipt = await send(withdraw, spend.proof, spend.spend, recipient, restored.value);
+  assert.equal(await provider.getBalance(recipient), expected.net);
+  assert.equal(await provider.getBalance(pool.target), 0n);
+  assert.equal(await pool.shieldedNative(), 0n);
+  await assert.rejects(withdraw.staticCall(spend.proof, spend.spend, recipient, restored.value));
+
+  const allFees = deposit.fee + expected.fee;
+  assert.equal(await staking.fundedWei(), allFees);
+  assert.equal(await provider.getBalance(staking.target), allFees);
+  assert.equal((await staking.position(owner)).claimable, 0n);
+  await at(2n);
+  assert.equal((await staking.position(owner)).claimable, allFees);
+  const rewardsTo = toBeHex(0xec203n, 20);
+  await send(staking.connect(user).claim, rewardsTo);
+  assert.equal(await provider.getBalance(rewardsTo), allFees);
+  assert.equal((await staking.position(owner)).claimable, 0n);
+  assert.equal(await token.balanceOf(staking.target), 1n);
+  t.diagnostic(`${gross} → ${deposit.net} → ${expected.net} wei; staking ${allFees} wei; withdrawal ${receipt.gasUsed} gas; ${(spend.proof.length - 2) / 2} proof bytes`);
+});

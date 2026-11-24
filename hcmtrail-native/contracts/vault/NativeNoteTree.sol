@@ -43,8 +43,8 @@ abstract contract NativeNoteTree {
     event RootPublished(bytes32 indexed root, uint64 count);
     error NoteTreeFull();
 
-    constructor(bytes32 domain_) {
-        poseidon = new PoseidonGoldilocks();
+    constructor(bytes32 domain_, PoseidonGoldilocks hasher) {
+        poseidon = hasher;
         domain = domain_;
         bytes32 leaf = domain_;
         // Canonically sample four Goldilocks limbs, rather than truncating the domain to one limb.

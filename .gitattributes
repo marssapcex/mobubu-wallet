@@ -1,0 +1,2 @@
+# PDF cross-reference tables contain binary-format padding, not source whitespace.
+*.pdf binary
