@@ -11,6 +11,7 @@ const nonos = 'contracts/vendor/nonos';
 const nb = `${nonos}/verifier/nb`;
 const poolPath = 'contracts/ethereum/EthShieldedPool.sol';
 const stakingPath = 'contracts/ethereum/EthFeeStaking.sol';
+const hcmtPath = 'contracts/ethereum/HcmtToken.sol';
 const poolFixture = 'test/fixtures/EthPoolFixture.sol';
 const labTokenPath = 'test/fixtures/LabStakeToken.sol';
 const labMessages = 'test/fixtures/LocalMessageTransport.sol';
@@ -30,17 +31,19 @@ function enforceSize(a, args) {
 
 export function compileVaults({ fixtures = false, labToken = false } = {}) {
   const paths = [...files(nonos), 'contracts/vault/NativeStark.sol', 'contracts/vault/NativeNoteTree.sol',
-    'contracts/vault/NativeNoteDeposits.sol', stakingPath, poolPath, 'contracts/ethereum/EthPoolState.sol',
+    'contracts/vault/NativeNoteDeposits.sol', stakingPath, hcmtPath, poolPath, 'contracts/ethereum/EthPoolState.sol',
     'contracts/ethereum/EthNetworkState.sol', 'contracts/ethereum/RollupMessageTransport.sol'];
   if (fixtures) paths.push(poolFixture);
   if (labToken || fixtures) paths.push(labTokenPath, labMessages);
   const { artifact } = compileSolidity(paths, { settings: { metadata: { bytecodeHash: 'none' } } });
   const pool = artifact(poolPath, 'EthShieldedPool');
   const staking = artifact(stakingPath, 'EthFeeStaking');
+  const hcmt = artifact(hcmtPath, 'HcmtToken');
   enforceSize(pool, [31337, ...Array(5).fill(ZeroAddress), [ZeroHash, Array(3).fill(ZeroAddress), Array(4).fill(ZeroAddress)]]);
   enforceSize(staking, [ZeroAddress]);
+  enforceSize(hcmt, [ZeroAddress]);
   return {
-    pool, staking,
+    pool, staking, hcmt,
     prepare: artifact(`${nb}/PrepareNb_A.sol`, 'PrepareNb_A'),
     walk: artifact(`${nb}/WalkNb_A.sol`, 'WalkNb_A'),
     evaluator: artifact(`${nb}/NbStraightEvaluatorAt.sol`, 'NbStraightEvaluatorAt'),
@@ -67,7 +70,7 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
   if (extra || ![lab, '--pins'].includes(mode)) {
     throw new Error('Usage: node scripts/build-vault.mjs [--pool-legacy-devnet | --pins] (test ETH only).');
   }
-  const { prepare, walk, evaluator, chunk, chunks, poseidon, pool, staking } = compileVaults();
+  const { prepare, walk, evaluator, chunk, chunks, poseidon, pool, staking, hcmt } = compileVaults();
   if (mode === '--pins') {
     console.log(JSON.stringify(Object.fromEntries(Object.entries({ prepare, walk, evaluator, poseidon }).map(([key, a]) =>
       [key, { hash: keccak256(a.runtimeTemplate), bytes: getBytes(a.runtimeTemplate).length, immutables: a.immutableReferences }])), null, 2));
@@ -75,7 +78,7 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
     const dir = new URL('build/eth-pool/', root);
     mkdirSync(dir, { recursive: true });
     const a = { PrepareNb_A: prepare, WalkNb_A: walk, NbStraightEvaluatorAt: evaluator, Chunk: chunk,
-      EvaluatorChunks: chunks, PoseidonGoldilocks: poseidon, EthShieldedPool: pool, EthFeeStaking: staking };
+      EvaluatorChunks: chunks, PoseidonGoldilocks: poseidon, EthShieldedPool: pool, EthFeeStaking: staking, HcmtToken: hcmt };
     for (const [name, artifact] of Object.entries(a)) {
       writeFileSync(new URL(`${name}.json`, dir), `${JSON.stringify(artifact, null, 2)}\n`);
     }

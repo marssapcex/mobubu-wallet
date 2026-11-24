@@ -6,6 +6,7 @@ import { ETH, FEE_BPS, MIN_DEPOSIT, MAX_BACKUP_BYTES, MAX_KEY_LENGTH, decodeNote
   prepareProof, privateBackup, quoteFee, readBackup, reservationLeg, splitDeposit, targetCount, ticketId, validateProof } from '/hcmtrail-native/pool/protocol.mjs';
 
 const $ = (id) => document.getElementById(id);
+const hcmtSupply = 100_000n * 10n ** 18n;
 const tabs = ['deposit', 'solo', 'smart'];
 const text = {
   deposit: ['NẠP VÀO POOL', 'Nạp ETH', 'Tạo note nạp'],
@@ -795,17 +796,18 @@ function renderStaking(s) {
   if (s.chainId !== config.chainId || (stakingView && s.block < stakingView.block)) return;
   stakingView = s;
   const { epoch, position: p } = s;
+  const symbol = config.stakeSymbol;
   $('staking-epoch').replaceChildren(node('i'), ` KỲ ${BigInt(epoch.epoch) + 1n}`);
   $('staking-pot').textContent = `${fmt(epoch.potWei)} ETH`;
-  $('stake-active').textContent = `${fmt(p?.active ?? 0n)} LAB`;
+  $('stake-active').textContent = `${fmt(p?.active ?? 0n)} ${symbol}`;
   $('claimable').textContent = `${fmt(p?.claimable ?? 0n)} ETH`;
-  $('staking-date').textContent = `Chốt kỳ: ${new Date(Number(epoch.closesAt) * 1000).toLocaleString('vi-VN')} · Tổng đang stake: ${fmt(epoch.active)} LAB.`;
+  $('staking-date').textContent = `Chốt kỳ: ${new Date(Number(epoch.closesAt) * 1000).toLocaleString('vi-VN')} · Tổng đang stake: ${fmt(epoch.active)} ${symbol}.`;
   $('open-staking').hidden = !!p;
   $('staking-user').hidden = !p;
   if (p) {
     $('stake-account').textContent = s.address;
     $('stake-balance').textContent = fmt(s.available);
-    $('stake-pending').textContent = `Kỳ sau: ${fmt(p.scheduled)} LAB stake · ${fmt(p.exiting)} LAB đang chờ rút · ${fmt(p.withdrawable)} LAB đã mở khóa.`;
+    $('stake-pending').textContent = `Kỳ sau: ${fmt(p.scheduled)} ${symbol} stake · ${fmt(p.exiting)} ${symbol} đang chờ rút · ${fmt(p.withdrawable)} ${symbol} đã mở khóa.`;
   }
   controls();
 }
@@ -815,6 +817,11 @@ function stakeFeedback(text, error = false) {
   el.textContent = text;
   el.classList.toggle('error', error);
   el.hidden = !text;
+}
+
+function stakeAmount() {
+  try { return { amount: parseAmount($('stake-amount').value) }; }
+  catch { throw new Error(`Nhập số ${config.stakeSymbol} dương, tối đa 18 chữ số thập phân.`); }
 }
 
 function doStake(action, payload = () => ({})) {
@@ -831,7 +838,7 @@ function doStake(action, payload = () => ({})) {
 }
 $('open-staking').onclick = () => doStake('open');
 for (const [button, action] of [['stake-add', 'stake'], ['stake-exit', 'exit']]) {
-  $(button).onclick = () => doStake(action, () => ({ amount: parseAmount($('stake-amount').value) }));
+  $(button).onclick = () => doStake(action, stakeAmount);
 }
 $('stake-withdraw').onclick = () => doStake('withdraw', () => ({ amount: stakingView.position.withdrawable }));
 $('claim-rewards').onclick = () => doStake('claim', () => ({ to: $('claim-recipient').value }));
@@ -843,6 +850,12 @@ async function connectNetwork(slug, data) {
   need(initial.chainId === selected.labId && initial.network === slug && initial.feeBps === FEE_BPS.toString() &&
     initial.domain === poolDomain(initial.chainId, initial.pool) && initial.lane === String(selected.lane) &&
     /^0x[0-9a-f]{64}$/.test(initial.networkDomain) && initial.releasePolicy?.releaseAllowed === false, 'Sai cấu hình mạng ETH thử.');
+  // An already-running lab from before HCMT integration serves LAB only.
+  const stakeSymbol = initial.stakeSymbol ?? 'LAB';
+  const validToken = initial.stakeSymbol === undefined || (slug === 'ethereum'
+    ? stakeSymbol === 'HCMT' && initial.stakeSupply === String(hcmtSupply)
+    : stakeSymbol === 'LAB' && initial.stakeSupply === null);
+  need(validToken, 'Sai cấu hình token staking lab.');
   const nextContext = { chainId: initial.chainId, pool: initial.pool, domain: initial.domain };
   let nextBackup = emptyBackup();
   if (data) {
@@ -853,7 +866,7 @@ async function connectNetwork(slug, data) {
   }
   const nextInterface = new Interface(initial.abi);
   const changed = config?.network !== slug || config.pool !== initial.pool;
-  config = { ...initial, label: selected.label, canProve: initial.wasm && typeof JSON.rawJSON === 'function' && typeof WebAssembly === 'object' };
+  config = { ...initial, stakeSymbol, label: selected.label, canProve: initial.wasm && typeof JSON.rawJSON === 'function' && typeof WebAssembly === 'object' };
   context = nextContext;
   iface = nextInterface;
   backup = nextBackup;
@@ -881,6 +894,14 @@ async function connectNetwork(slug, data) {
   updateWithdrawQuote();
   $('pool-address').textContent = config.pool;
   $('staking-address').textContent = config.staking;
+  $('stake-symbol').textContent = stakeSymbol;
+  $('stake-token-symbol').textContent = stakeSymbol;
+  $('stake-token-address').textContent = config.stakeToken ?? '—';
+  $('stake-amount-label').textContent = `Số ${stakeSymbol}`;
+  $('open-staking').replaceChildren(`Tạo ví thử · nhận 100 ${stakeSymbol} `, node('span', '↗'));
+  $('staking-token-note').textContent = stakeSymbol === 'HCMT'
+    ? 'HCMT thử: 100.000 token được cấp một lần; ví thử nhận qua chuyển token, không mint thêm.'
+    : 'LAB chỉ là token thử, không phải HCMT.';
   $('source').hidden = !config.wasm;
   if (changed) {
     $('recipient').value = '';
@@ -905,5 +926,5 @@ try {
   await connectNetwork('ethereum');
   await poll();
 } catch {
-  feedback('Không khởi tạo được phiên ETH Pool mới. Hãy mở preview ETH Pool + Staking (4184). Note thử của phiên cũ không dùng ở đây.', true);
+  feedback('Không khởi tạo được phiên ETH Pool mới. Hãy mở lại preview ETH Vault đang chạy. Note thử của phiên cũ không dùng ở đây.', true);
 }

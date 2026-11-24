@@ -1,7 +1,7 @@
 import { createServer } from 'node:http';
 import { createHash, randomBytes } from 'node:crypto';
 import { readFile, stat } from 'node:fs/promises';
-import { ARBITRUM, ETH_LABS, TX_GAS_CAP } from '../hcmtrail-native/testnet/networks.mjs';
+import { ARBITRUM, ETHEREUM, ETH_LABS, TX_GAS_CAP } from '../hcmtrail-native/testnet/networks.mjs';
 import { localClearing } from '../hcmtrail-native/pool/local-clearing.mjs';
 import { ETH_POOL_LEGACY } from '../hcmtrail-native/pool/lab-profile.mjs';
 import { ETH_POOL_RELEASE_POLICY, requireEthPoolRelease } from '../hcmtrail-native/pool/release-policy.mjs';
@@ -45,7 +45,8 @@ for (const network of ETH_LABS) {
   const config = { chainId: network.labId, network: network.slug, lane, pool: pool.target,
     networkDomain: await pool.networkDomain(), arbitrumPacketGas,
     domain: await pool.domain(), domainLeaf: await pool.domainLeaf(), feeBps: await pool.FEE_BPS(),
-    staking: staking.target, stakeToken: token.target, minDeposit: MIN_DEPOSIT, abi: vm.artifacts.pool.abi,
+    staking: staking.target, stakeToken: token.target, stakeSymbol: await token.symbol(),
+    stakeSupply: lane === ETHEREUM ? await token.totalSupply() : null, minDeposit: MIN_DEPOSIT, abi: vm.artifacts.pool.abi,
     wasm, cache: !!cache, proofProfile: ETH_POOL_LEGACY, releasePolicy: ETH_POOL_RELEASE_POLICY };
   let serial = Promise.resolve();
   const write = (fn) => {
@@ -163,7 +164,10 @@ async function submitStaking(b, vm, session) {
         if (vm.sessions.size >= 64) throw new Error('Hết chỗ thử staking.');
         actor = Wallet.createRandom().connect(provider);
         await (await signer.sendTransaction({ to: actor.address, value: parseEther('0.1'), ...opts })).wait();
-        await sent(token.mint, actor.address, parseEther('100'));
+        // HCMT is transferred from the lab genesis holder. Only LAB fixtures mint.
+        const grant = parseEther('100');
+        if (vm.lane === ETHEREUM) await sent(token.transfer, actor.address, grant);
+        else await sent(token.mint, actor.address, grant);
         vm.sessions.set(session, actor);
       }
       return readStaking(vm, actor);
@@ -181,7 +185,7 @@ async function submitStaking(b, vm, session) {
       if (amount === 0n || amount >= 1n << 128n) throw new Error('Số token ngoài giới hạn.');
       switch (b.action) {
         case 'stake':
-          if (await token.balanceOf(actor.address) < amount) throw new Error('Không đủ LAB.');
+          if (await token.balanceOf(actor.address) < amount) throw new Error(`Không đủ ${vm.config.stakeSymbol}.`);
           await sent(token.connect(actor).approve, staking.target, amount);
           receipt = await sent(user.stake, amount);
           break;

@@ -128,23 +128,24 @@
       <div class="staking-content">
         <div class="staking-stats">
           <div><span class="caption">PHÍ CHỜ CHIA</span><strong id="staking-pot">— ETH</strong></div>
-          <div><span class="caption">STAKE ĐANG TÍNH</span><strong id="stake-active">— LAB</strong></div>
+          <div><span class="caption">STAKE ĐANG TÍNH</span><strong id="stake-active">—</strong></div>
           <div><span class="caption">THƯỞNG CÓ THỂ NHẬN</span><strong id="claimable">— ETH</strong></div>
         </div>
         <p class="hint" id="staking-date">Mỗi mạng có hợp đồng và quỹ phí riêng.</p>
-        <p class="hint">Stake hoặc yêu cầu rút token có hiệu lực từ kỳ sau. Bạn có thể nhận dồn thưởng của nhiều kỳ. LAB chỉ là token thử.</p>
-        <button class="secondary" type="button" id="open-staking" disabled>Tạo ví staking thử · nhận 100 LAB <span aria-hidden="true">↗</span></button>
+        <p class="hint">Mỗi kỳ 30 ngày, phí ETH chia theo tỷ lệ token đang stake, không tính token giữ trong ví. Thay đổi stake có hiệu lực từ kỳ sau; có thể nhận dồn nhiều kỳ.</p>
+        <p class="hint" id="staking-token-note">Chỉ dùng token thử.</p>
+        <button class="secondary" type="button" id="open-staking" disabled>Tạo ví staking thử <span aria-hidden="true">↗</span></button>
         <div id="staking-user" hidden>
-          <p class="hint">Ví thử: <code id="stake-account">—</code> · <b id="stake-balance">—</b> LAB còn dùng được.</p>
+          <p class="hint">Ví thử: <code id="stake-account">—</code> · <b id="stake-balance">—</b> <span id="stake-symbol"></span> còn dùng được.</p>
           <p class="hint" id="stake-pending">—</p>
           <div class="staking-forms">
             <div>
-              <label for="stake-amount">Số LAB</label><input id="stake-amount" inputmode="decimal" maxlength="60" placeholder="10">
+              <label id="stake-amount-label" for="stake-amount">Số token</label><input id="stake-amount" inputmode="decimal" maxlength="60" placeholder="10">
               <div class="staking-actions">
                 <button type="button" class="secondary" id="stake-add">Stake</button>
-                <button type="button" class="secondary" id="stake-exit">Yêu cầu rút LAB</button>
+                <button type="button" class="secondary" id="stake-exit">Yêu cầu rút token</button>
               </div>
-              <button type="button" class="link-button" id="stake-withdraw">Nhận lại LAB đã mở khóa</button>
+              <button type="button" class="link-button" id="stake-withdraw">Nhận lại token đã mở khóa</button>
             </div>
             <div>
               <label for="claim-recipient">Địa chỉ nhận thưởng <span>· tùy chọn</span></label><input id="claim-recipient" maxlength="42" placeholder="Trống: nhận vào ví thử" spellcheck="false">
@@ -155,7 +156,7 @@
         <p class="feedback" id="staking-feedback" role="status" hidden></p>
       </div>
     </section>
-    <details class="details"><summary>Phạm vi riêng tư và địa chỉ hợp đồng</summary><p>Số ETH, tuyến rút, địa chỉ nhận và thời điểm giao dịch vẫn công khai. Rút liên mạng gửi thông điệp xác thực, không chở ETH qua các chặng. Lượt trong lô không đồng nghĩa với số người độc lập. Dùng ví nạp để nhận lại hoặc rút số tiền dễ nhận ra có thể làm lộ liên kết. STARK ở đây chưa được kiểm toán hay chứng nhận an toàn hậu lượng tử.</p><p>Pool: <code id="pool-address">—</code> · Staking: <code id="staking-address">—</code>. Dữ liệu bị xóa khi devnet khởi động lại.</p><p><a id="source" href="./prover-source.tar.gz" hidden>Mã nguồn trình tạo proof (AGPL)</a></p></details>
+    <details class="details"><summary>Phạm vi riêng tư và địa chỉ hợp đồng</summary><p>Số ETH, tuyến rút, địa chỉ nhận và thời điểm giao dịch vẫn công khai. Rút liên mạng gửi thông điệp xác thực, không chở ETH qua các chặng. Lượt trong lô không đồng nghĩa với số người độc lập. Dùng ví nạp để nhận lại hoặc rút số tiền dễ nhận ra có thể làm lộ liên kết. STARK ở đây chưa được kiểm toán hay chứng nhận an toàn hậu lượng tử.</p><p>Pool: <code id="pool-address">—</code> · Staking: <code id="staking-address">—</code> · Token <span id="stake-token-symbol">stake</span>: <code id="stake-token-address">—</code>. Dữ liệu bị xóa khi devnet khởi động lại.</p><p><a id="source" href="./prover-source.tar.gz" hidden>Mã nguồn trình tạo proof (AGPL)</a></p></details>
   </main>
   <footer class="shell footer"><strong>hcmtrail</strong><span>Ba EVM lab · ETH thử · Không dùng tiền thật</span></footer>
 </body>

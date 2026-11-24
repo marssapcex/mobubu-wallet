@@ -8,7 +8,8 @@ Một mã pool ETH trên Ethereum (`31337` lab), Arbitrum One (`31338`) và Base
 | --- | --- |
 | [`EthShieldedPool`](contracts/ethereum/EthShieldedPool.sol) | Cùng verifier và trạng thái pool trên ba VM. Rút cùng mạng trực tiếp, theo lô hoặc hoàn về note. |
 | [`EthNetworkState`](contracts/ethereum/EthNetworkState.sol) | Khóa note ở nguồn, nhận xác thực, chi ETH từ thanh khoản ở đích, nhận kết quả hoặc khôi phục note. |
-| [`EthFeeStaking`](contracts/ethereum/EthFeeStaking.sol) | Từng deployment có staking riêng nhận phí bằng ETH và chia theo kỳ 30 ngày. |
+| [`EthFeeStaking`](contracts/ethereum/EthFeeStaking.sol) | Quỹ phí ETH riêng mỗi deployment, chia theo tỷ lệ stake đang hiệu lực sau mỗi kỳ 30 ngày. Ethereum lab dùng HCMT; Base và Arbitrum lab dùng LAB thử. |
+| [`HcmtToken`](contracts/ethereum/HcmtToken.sol) | ERC-20, 18 decimals, cấp một lần 100.000 HCMT. Không có owner, mint thêm, burn hay nâng cấp. |
 | [`NativeStark`](contracts/vault/NativeStark.sol) | Pinned NotBefore A trên devnet. `build`/`build:pool`/`pool:eth` mặc định chặn release. [HCFR v2](docs/ETH-POOL-STARK256.md) chỉ là nghiên cứu FRI. |
 
 [Luồng sáu chiều](docs/ETH-CLEARING.md) · [Runbook khóa note](docs/ETH-POOL.md) · [Staking](docs/ETH-FEE-STAKING.md) · [Verifier pins](docs/VAULTS.md).

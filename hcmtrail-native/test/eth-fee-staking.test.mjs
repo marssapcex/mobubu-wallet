@@ -1,7 +1,9 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { id, toBeHex } from 'ethers';
+import { id, keccak256, parseEther, toBeHex } from 'ethers';
 import { deployEthPool } from '../pool/local.mjs';
+import { ETH, FEE_BPS, MIN_DEPOSIT, abi, directLeg, quoteFee, statement } from '../pool/protocol.mjs';
+import { openNote } from '../testnet/notes.mjs';
 import { TX_GAS_CAP } from '../testnet/networks.mjs';
 
 const opts = { gasLimit: TX_GAS_CAP };
@@ -10,10 +12,10 @@ const to = (n) => toBeHex(0x5a7100n + BigInt(n), 20);
 const has = (name) => (e) => e.revert?.name === name || e.data?.startsWith(id(`${name}()`).slice(0, 10));
 
 async function lab(t) {
-  const vm = await deployEthPool({ fixtures: true, harness: true, vmOptions: { keys: [1, 2, 3].map((k) => toBeHex(k, 32)) } });
+  const vm = await deployEthPool({ fixtures: true, harness: true, vmOptions: { keys: [1, 2, 3, 4].map((k) => toBeHex(k, 32)) } });
   t.after(vm.close);
   const { token, staking, provider } = vm;
-  const [a, b, c] = await Promise.all([0, 1, 2].map((k) => provider.getSigner(k)));
+  const [a, b, c] = await Promise.all([1, 2, 3].map((k) => provider.getSigner(k)));
   const start = await staking.start(), period = await staking.PERIOD();
   assert.equal(period, 2_592_000n);
   const at = async (e, offset = 0n) => {
@@ -22,12 +24,81 @@ async function lab(t) {
   };
   const fund = async (value) => (await staking.fundFees({ ...opts, value })).wait();
   const stake = async (who, amount) => {
-    await send(token.mint, who.address, amount);
+    await send(token.transfer, who.address, amount);
     await send(token.connect(who).approve, staking.target, amount);
     await send(staking.connect(who).stake, amount);
   };
   return { ...vm, a, b, c, at, stake, fund, period, position: (who) => staking.position(who.address) };
 }
+
+test('vault fees at 30-day boundaries are proportional to active HCMT, not wallet balances', { timeout: 120_000 }, async (t) => {
+  const { a, b, c, at, stake, position, staking, token, pool, provider } = await lab(t);
+  const cap = parseEther('100000'), one = parseEther('1'), three = parseEther('3');
+  assert.equal(await token.totalSupply(), cap);
+  assert.equal(await token.symbol(), 'HCMT');
+  assert.equal(await staking.stakeToken(), token.target);
+  await send(token.transfer, a.address, parseEther('1000')); // Bigger wallet, but smaller stake than b.
+  await send(token.transfer, c.address, parseEther('100')); // Holder who does not stake receives no ETH.
+  await stake(a, one);
+  await stake(b, three);
+  assert.equal((await position(a)).active, 0n);
+  assert.equal((await position(b)).active, 0n);
+  await at(1);
+  assert.equal((await position(a)).active, one);
+  assert.equal((await position(b)).active, three);
+  assert.equal((await staking.epochState()).active, one + three);
+  assert.equal(await token.balanceOf(staking.target), one + three);
+
+  // These pot sizes divide exactly in both wei and the Q128 index for 4e18 shares.
+  const wdFee = 4n * 5n ** 18n, depFee = 2n * wdFee;
+  const grossForFee = (fee) => (fee * 10_000n + FEE_BPS - 1n) / FEE_BPS;
+  const deposited = grossForFee(depFee), withdrawn = grossForFee(wdFee);
+  const deposit = quoteFee(deposited), withdrawal = quoteFee(withdrawn);
+  assert.ok(deposited >= MIN_DEPOSIT && deposit.net >= withdrawn);
+  assert.equal(deposit.fee, depFee);
+  assert.equal(withdrawal.fee, wdFee);
+  const note = openNote(ETH, deposit.net);
+  const receipt = await (await pool.deposit(note.ownerCommit, { ...opts, value: deposited })).wait();
+  const feeTopic = staking.interface.getEvent('FeesFunded').topicHash;
+  const feeEvent = receipt.logs.find((log) => log.address === staking.target && log.topics[0] === feeTopic);
+  assert.deepEqual(staking.interface.parseLog(feeEvent).args.toArray(), [1n, pool.target, depFee]);
+  await at(2, -1n);
+  assert.equal((await position(a)).claimable, 0n, 'no ETH before period close');
+  assert.equal((await position(b)).claimable, 0n);
+
+  await at(2);
+  assert.equal((await position(a)).claimable, depFee / 4n);
+  assert.equal((await position(b)).claimable, depFee * 3n / 4n);
+  assert.equal((await position(c)).claimable, 0n);
+  await send(staking.connect(a).claim, to(51));
+  assert.equal(await provider.getBalance(to(51)), depFee / 4n);
+
+  // Exercise the vault payout accounting with the explicitly test-only spend verifier.
+  const tip = await provider.getBlock('latest');
+  const spend = { root: await pool.currentRoot(), notBefore: BigInt(tip.timestamp) / 600n * 600n,
+    nullifiers: [toBeHex(5001n, 32), toBeHex(5002n, 32)], change: [toBeHex(5003n, 32), toBeHex(5004n, 32)] };
+  const recipient = to(53);
+  const proof = keccak256(abi.encode(['uint256[]'], [statement(spend, directLeg(recipient, withdrawn, staking.target))]));
+  await send(pool.withdraw, proof, spend, recipient, withdrawn);
+  assert.equal(await provider.getBalance(recipient), withdrawal.net);
+  assert.equal(await staking.fundedWei(), depFee + wdFee);
+  assert.equal((await position(a)).claimable, 0n, 'new fee is not mature');
+  assert.equal((await position(b)).claimable, depFee * 3n / 4n, 'unclaimed ETH survives');
+
+  await at(3);
+  const total = depFee + wdFee;
+  assert.equal((await position(a)).claimable, wdFee / 4n);
+  assert.equal((await position(b)).claimable, total * 3n / 4n);
+  await send(staking.connect(a).claim, to(51));
+  await send(staking.connect(b).claim, to(52)); // Waited two periods, claimed once.
+  assert.equal(await provider.getBalance(to(51)), total / 4n);
+  assert.equal(await provider.getBalance(to(52)), total * 3n / 4n);
+  assert.equal(await staking.claimedWei(), total);
+  assert.equal(await provider.getBalance(staking.target), 0n);
+  assert.equal(await token.balanceOf(staking.target), one + three, 'claims do not touch HCMT');
+  assert.equal(await token.totalSupply(), cap);
+  t.diagnostic(`1 HCMT vs 3 HCMT: ${total / 4n} vs ${total * 3n / 4n} wei from two closed periods`);
+});
 
 test('monthly fixed shares, delayed activation and exit, manual claims can accumulate without an epoch loop', { timeout: 90_000 }, async (t) => {
   const { a, b, c, at, stake, fund, position, staking, token, provider, artifacts, deploy } = await lab(t);

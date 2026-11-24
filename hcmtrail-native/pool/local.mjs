@@ -25,14 +25,16 @@ async function prepareVm(network, artifacts, vmOptions, { verify = true, transpo
   const vm = await localEvm(BigInt(network.labId), vmOptions);
   try {
     const deploy = (artifact, ...args) => vm.deploy(artifact, ...args, { gasLimit: TX_GAS_CAP });
-    const token = await deploy(artifacts.labToken);
+    const from = await vm.signer.getAddress();
     const onL1 = network.slug === 'ethereum';
+    // Only the Ethereum VM has a HCMT issuance. Other lanes use a fixture to
+    // exercise their own fee ledgers, not extra copies of the HCMT supply.
+    const token = onL1 ? await deploy(artifacts.hcmt, from) : await deploy(artifacts.labToken);
     const base = transport && network.slug !== 'arbitrum' ? await deploy(artifacts.labMessenger, ZeroAddress) : null;
     const outbox = transport && onL1 ? await deploy(artifacts.labOutbox) : null;
     const bridge = outbox ? await deploy(artifacts.labBridge, outbox.target) : null;
     const arb = transport && network.slug !== 'base' ? await deploy(artifacts.labMessenger, bridge?.target ?? ZeroAddress) : null;
     const stack = verify ? await deployNoteStack(deploy, artifacts) : [];
-    const from = await vm.signer.getAddress();
     const predicted = getCreateAddress({ from, nonce: await vm.provider.getTransactionCount(from, 'pending') });
     const messages = [base?.target ?? ZeroAddress, onL1 ? arb?.target ?? ZeroAddress : ZeroAddress,
       bridge?.target ?? ZeroAddress, network.slug === 'arbitrum' ? arb?.target ?? ZeroAddress : ZeroAddress];

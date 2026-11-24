@@ -23,12 +23,13 @@
 | [`EthPoolState.sol`](../contracts/ethereum/EthPoolState.sol) | Sổ ETH, phí, nullifier, rút nội mạng, giữ chỗ và chi theo lô. |
 | [`EthNetworkState.sol`](../contracts/ethereum/EthNetworkState.sol) | Khóa note nguồn, chi từ thanh khoản đã có ở đích, xác nhận hoặc hoàn. |
 | [`RollupMessageTransport.sol`](../contracts/ethereum/RollupMessageTransport.sol) | Gửi và kiểm nguồn thông điệp; không chuyển ETH gốc trong packet. |
-| [`EthFeeStaking.sol`](../contracts/ethereum/EthFeeStaking.sol) | Staking ERC-20, chia phí ETH theo kỳ 30 ngày. |
+| [`EthFeeStaking.sol`](../contracts/ethereum/EthFeeStaking.sol) | Staking, chia phí ETH theo tỷ lệ token đang stake trong kỳ 30 ngày; Ethereum lab gắn với HCMT. |
+| [`HcmtToken.sol`](../contracts/ethereum/HcmtToken.sol) | ERC-20 cấp đúng 100.000 HCMT một lần lúc deploy, không có quyền mint thêm hoặc nâng cấp. |
 | [`NativeNoteDeposits.sol`](../contracts/vault/NativeNoteDeposits.sol) | Nạp ETH, commitment note và kiểm phân bổ khi nạp lô. |
 | [`NativeNoteTree.sol`](../contracts/vault/NativeNoteTree.sol) | Cây note Poseidon riêng theo deployment. |
 | [`NativeStark.sol`](../contracts/vault/NativeStark.sol) | Verifier chi note NotBefore A và kiểm pin bytecode. **Chỉ dùng cho lab, không đạt ngưỡng hậu lượng tử.** |
 
-[Pin verifier](VAULTS.md) · [Build vault](../scripts/build-vault.mjs) · [Test sáu chiều](../test/eth-clearing.test.mjs) · [Test proof WASM thật](../test/eth-clearing-fresh.test.mjs).
+[Pin verifier](VAULTS.md) · [Build vault và token](../scripts/build-vault.mjs) · [Cách chia phí](ETH-FEE-STAKING.md) · [Test HCMT](../test/hcmt.test.mjs) · [Test sáu chiều](../test/eth-clearing.test.mjs) · [Test proof WASM thật](../test/eth-clearing-fresh.test.mjs).
 
 ### Phụ thuộc Solidity đã ghim của Vault V3
 

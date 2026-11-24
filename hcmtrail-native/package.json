@@ -9,7 +9,7 @@
   },
   "scripts": {
     "build": "node scripts/build-vault.mjs",
-    "test": "node --test test/eth-pool.test.mjs test/eth-fee-staking.test.mjs test/eth-clearing.test.mjs test/stark256.test.mjs",
+    "test": "node --test test/eth-pool.test.mjs test/eth-fee-staking.test.mjs test/hcmt.test.mjs test/eth-clearing.test.mjs test/stark256.test.mjs",
     "build:pool": "node scripts/build-vault.mjs --pool",
     "build:pool:wasm": "bash scripts/build-pool-wasm.sh",
     "test:pool": "node --test test/eth-pool.test.mjs",
@@ -19,6 +19,7 @@
     "build:pool:256": "node scripts/build-vault.mjs --pool-256",
     "report:pool:256": "node scripts/pool-stark256-report.mjs",
     "test:pool:256": "node --test test/stark256.test.mjs",
+    "test:hcmt": "node --test test/hcmt.test.mjs",
     "test:staking": "node --test test/eth-fee-staking.test.mjs",
     "test:pool:key": "node --test test/eth-key-fresh.test.mjs",
     "test:routes": "node --test test/eth-clearing.test.mjs",

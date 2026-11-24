@@ -8,15 +8,16 @@ import { ETH, decodeNoteKey, directLeg, encodeNoteKey, parseProver, poolDomain, 
 import { readPool } from '../pool/view.mjs';
 import { proveInWasm } from '../pool/wasm.mjs';
 import { TX_GAS_CAP } from '../testnet/networks.mjs';
+import { LOCAL_ID } from './local-evm.mjs';
 import * as codec from '../testnet/notes.mjs';
 
 const opts = { gasLimit: TX_GAS_CAP };
 const send = async (f, ...a) => (await f(...a, opts)).wait();
 
-test('Base VM: recover from text note key, verify a real WASM STARK, withdraw ETH and claim exact monthly fees', { timeout: 1_800_000 }, async (t) => {
+test('Ethereum VM: recover a note, verify a real WASM STARK, withdraw ETH and claim fees with staked HCMT', { timeout: 1_800_000 }, async (t) => {
   const wasm = readFileSync(new URL('../build/eth-pool/prover.wasm', import.meta.url));
   const cache = process.env.POOL_PERIODIC_CACHE ? readFileSync(process.env.POOL_PERIODIC_CACHE) : undefined;
-  const vm = await deployEthPool({ chainId: 31339n });
+  const vm = await deployEthPool({ chainId: LOCAL_ID });
   t.after(vm.close);
   const { pool, token, staking, provider } = vm;
   const user = await provider.getSigner(1);
@@ -27,15 +28,18 @@ test('Base VM: recover from text note key, verify a real WASM STARK, withdraw ET
     await provider.send('evm_setNextBlockTimestamp', [Number(end + period * epoch)]);
     await provider.send('evm_mine', []);
   };
-  await send(token.mint, owner, 1n);
-  await send(token.connect(user).approve, staking.target, 1n);
-  await send(staking.connect(user).stake, 1n);
+  const staked = parseEther('1');
+  assert.equal(await token.symbol(), 'HCMT');
+  assert.equal(await staking.stakeToken(), token.target);
+  await send(token.transfer, owner, staked);
+  await send(token.connect(user).approve, staking.target, staked);
+  await send(staking.connect(user).stake, staked);
   await at(1n);
 
   const gross = parseEther('1') + 17n;
   const deposit = quoteFee(gross);
   const note = codec.openNote(ETH, deposit.net);
-  const context = { chainId: '31339', pool: pool.target, domain: poolDomain(31339n, pool.target) };
+  const context = { chainId: String(LOCAL_ID), pool: pool.target, domain: poolDomain(LOCAL_ID, pool.target) };
   assert.equal(await pool.domain(), context.domain);
   const key = encodeNoteKey(privateBackup(context, [note]));
   await (await pool.deposit(note.ownerCommit, { ...opts, value: gross })).wait();
@@ -66,11 +70,16 @@ test('Base VM: recover from text note key, verify a real WASM STARK, withdraw ET
   assert.equal(await provider.getBalance(staking.target), allFees);
   assert.equal((await staking.position(owner)).claimable, 0n);
   await at(2n);
-  assert.equal((await staking.position(owner)).claimable, allFees);
+  const scale = 1n << 128n;
+  const claimable = ((allFees * scale / staked) * staked) / scale;
+  assert.ok(allFees - claimable <= 1n);
+  assert.equal((await staking.position(owner)).claimable, claimable);
   const rewardsTo = toBeHex(0xec203n, 20);
   await send(staking.connect(user).claim, rewardsTo);
-  assert.equal(await provider.getBalance(rewardsTo), allFees);
+  assert.equal(await provider.getBalance(rewardsTo), claimable);
+  assert.equal(await provider.getBalance(staking.target), allFees - claimable);
   assert.equal((await staking.position(owner)).claimable, 0n);
-  assert.equal(await token.balanceOf(staking.target), 1n);
+  assert.equal(await token.balanceOf(staking.target), staked);
+  assert.equal(await token.totalSupply(), parseEther('100000'));
   t.diagnostic(`${gross} → ${deposit.net} → ${expected.net} wei; staking ${allFees} wei; withdrawal ${receipt.gasUsed} gas; ${(spend.proof.length - 2) / 2} proof bytes`);
 });

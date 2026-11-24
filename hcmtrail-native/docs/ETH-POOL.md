@@ -1,6 +1,6 @@
 # hcmtrail — nạp và rút ETH bằng khóa note
 
-**ETH thử, ba cây note riêng.** Một mã `EthShieldedPool` chạy trên ba EVM lab: Ethereum (`31337`), Arbitrum One (`31338`), Base (`31339`). Mỗi mạng có cây note và hợp đồng staking riêng. Giao diện hỗ trợ rút cùng mạng và [sáu chiều rút liên mạng](ETH-CLEARING.md) từ thanh khoản tự do ở đích.
+**ETH thử, ba cây note riêng.** Một mã `EthShieldedPool` chạy trên ba EVM lab: Ethereum (`31337`), Arbitrum One (`31338`), Base (`31339`). Mỗi mạng có cây note và hợp đồng staking riêng. Chọn Ethereum để stake [HCMT](ETH-FEE-STAKING.md); hai VM còn lại dùng LAB thử, không phải HCMT. Giao diện hỗ trợ rút cùng mạng và [sáu chiều rút liên mạng](ETH-CLEARING.md) từ thanh khoản tự do ở đích.
 
 ## Chạy lab
 
@@ -47,6 +47,6 @@ npm --prefix hcmtrail-native run test:routes:fresh # cần WASM; proof thật v�
 npm --prefix hcmtrail-native run test:pool:fresh   # luồng dài: proof thật và lô 5 lượt
 ```
 
-`test:pool:key` dùng khóa note trên VM Base, tạo STARK thật, trả net và nhận phí staking sau khi kỳ đóng. [Test liên mạng](ETH-CLEARING.md) có ma trận cả sáu chiều và một bài proof thật riêng. Test chi lô 100 lượt chỉ dùng proof fixture để đo bước kế toán và chuyển ETH; không phải xác minh 100 proof trong một giao dịch.
+`test:pool:key` dùng khóa note trên VM Ethereum, tạo STARK thật, trả net và dùng HCMT đang stake để nhận phí ETH sau khi kỳ đóng. [Test liên mạng](ETH-CLEARING.md) có ma trận cả sáu chiều và một bài proof thật riêng. Test chi lô 100 lượt chỉ dùng proof fixture để đo bước kế toán và chuyển ETH; không phải xác minh 100 proof trong một giao dịch.
 
 **STARK không tự chứng minh hậu lượng tử.** Lab dùng verifier NotBefore A ghim đúng bytecode; mức cổ điển upstream báo khoảng 80,1 bit. FRI nghiên cứu chưa chứng minh quyền chi note. Cổng phát hành vẫn yêu cầu ≥256 bit soundness cổ điển và phân tích lượng tử được rà soát cho mục tiêu 128 bit, xem [ETH-POOL-STARK256.md](ETH-POOL-STARK256.md). Số tiền, địa chỉ payout, thời gian và dữ liệu staking công khai. Không triển khai lên chain công khai và không nạp tiền thật.
