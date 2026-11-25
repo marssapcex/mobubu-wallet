@@ -4,8 +4,8 @@ Ngày: 2026-11-18 · Nhánh `arena/32000e7e-mobubu-wallet` · Phạm vi: **chỉ
 
 ## 1. Kết luận ngắn
 
-- Đã chạy **3.670.016 lời gọi thay đổi trạng thái được mô hình hoá** bằng Forge
-  (fuzz + invariant: 3.145.728 + 98.304 + 32.768 + 393.216) và **15 đường tượng trưng**
+- Đã chạy **4.849.664 lời gọi thay đổi trạng thái được mô hình hoá** bằng Forge
+  (fuzz + invariant: 3.145.728 + 98.304 + 32.768 + 1.572.864) và **15 đường tượng trưng**
   bằng Halmos trên token HCMT.
 - **Không phát hiện lỗi mất tiền trực tiếp** trong lớp kế toán Solidity đã đọc.
   Có **1 phát hiện mức trung bình** (khoá làn rút lô tạm thời), vài phát hiện mức thấp
@@ -50,7 +50,7 @@ Ngày: 2026-11-18 · Nhánh `arena/32000e7e-mobubu-wallet` · Phạm vi: **chỉ
 | 2 | Forge invariant | `StakingInvariantTest` (3 tác nhân, nhảy kỳ) | 1.024 chuỗi × 96 bước | **98.304** (0 revert) | PASS | 51,88 s |
 | 3 | Forge fuzz | `VaultSolidityTest.testFuzz_SameGrossSameFeeAndExactWei` | 32.768 ca | 32.768 | PASS | 0,9 s |
 | 4 | Forge test | `VaultSolidityTest.test_BatchAccountingAndRelayCap` | 20 vé × 0,5 ETH | 20 lần chi | PASS | — |
-| 5 | Forge invariant | `StatefulInvariantTest` (mục tiêu dùng chung Medusa/Echidna) | 6 tính chất × 512 chuỗi × 128 bước | **393.216** (handler: 22.653 hành động, 0 revert) | PASS | 512,97 s |
+| 5 | Forge invariant | `StatefulInvariantTest` (mục tiêu dùng chung Medusa/Echidna) | 6 tính chất × 2.048 chuỗi × 128 bước | **1.572.864** (handler: 90.717 hành động/lượt, 0 revert) | PASS | 2.109,61 s |
 | 6 | Halmos | `HcmtSymbolicTest` (3 tính chất) | z3, mọi `uint96` | **15 đường** (6 + 6 + 3) | PASS | 0,35 s |
 | 7 | Halmos | `PoolSymbolicTest` (quy tắc phí) | z3 | — | **chặn**: `setUp()` không có đường thành công | — |
 | 8 | Forge test | `RefundFindingTest` (2 kịch bản thử phá hoàn tiền) | lô đã chi + lô hết hạn | — | **âm tính**: cả hai đều bị chặn | 0,16 s |
@@ -139,7 +139,8 @@ chỉ "khó tính" chặn được lô (người nhận do chính người nạp
 - Hoàn tiền sau hết hạn đúng **một lần** cho mỗi phần; lần thứ hai revert, số dư note
   không tăng thêm.
 - `reservedNative`, `reservedRefundLeaves` và `address(this).balance` khớp nhau qua
-  262.144 lời gọi stateful (bất biến #5).
+  1.572.864 lời gọi stateful (bất biến #5). Bản chạy nhỏ hơn (6 × 512 × 128 = 393.216
+  lời gọi) cũng PASS, dùng để đối chiếu thời gian.
 - `claimedWei ≤ fundedWei`, `relayClaimedWei ≤ relayFundedWei` qua toàn bộ chiến dịch.
 - Với 65.536 ca fuzz, tổng cung HCMT và tổng số dư ba tác nhân luôn bảo toàn; allowance
   hữu hạn luôn giảm đúng bằng số đã chi.
