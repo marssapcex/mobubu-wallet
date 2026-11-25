@@ -1,6 +1,6 @@
 # Stake HCMT, nhận phí bằng ETH
 
-[`EthShieldedPool`](../contracts/ethereum/EthShieldedPool.sol) tạo một [`EthFeeStaking`](../contracts/ethereum/EthFeeStaking.sol) riêng cho từng deployment. Staking nhận phí **0,09% khi nạp và 0,09% khi rút** từ pool trên cùng mạng. Rút liên mạng trả phí vào staking ở **mạng chi trả**, không thu thêm ở nguồn. Không dùng ETH gốc trong note để chia thưởng. Địa chỉ token stake được ghim lúc deploy và không thay đổi được. Vault vẫn chỉ nhận ETH để tạo note.
+[`EthShieldedPool`](../contracts/ethereum/EthShieldedPool.sol) tạo một [`EthFeeStaking`](../contracts/ethereum/EthFeeStaking.sol) riêng cho từng deployment. Staking nhận phí **0,09% khi nạp và 0,09% khi rút** từ pool trên cùng mạng. Rút liên mạng hạch toán phí ở **mạng chi trả**, không thu thêm ở nguồn. Trên Ethereum lab, khi ví đủ điều kiện [relayer](ETH-RELAYER.md) thực hiện chi trả, một phần phí rút được ghi tín dụng relayer có trần; chỉ phần còn lại chia theo kỳ 30 ngày. Phí nạp không có tín dụng này. Không dùng ETH gốc trong note để chia thưởng. Địa chỉ token stake được ghim lúc deploy và không thay đổi được. Vault vẫn chỉ nhận ETH để tạo note.
 
 ## HCMT: đúng 100.000 token, cấp một lần
 
@@ -11,7 +11,7 @@
 ## Chu kỳ 30 ngày
 
 - Các kỳ dài đúng **2.592.000 giây**, bắt đầu từ thời điểm deploy, không theo tháng lịch. Staking và yêu cầu rút token có hiệu lực ở **đầu kỳ sau**. Shares cố định trong cả kỳ: gửi token cuối kỳ không ăn phí của kỳ đó và không có stake rồi rút trong cùng một giao dịch để nhận thưởng.
-- Khi một kỳ đóng, mỗi người hưởng `phí ETH kỳ đó × stake đang hiệu lực của mình / tổng stake đang hiệu lực`. Nếu cả kỳ chỉ có A stake 1 HCMT và B stake 3 HCMT, A hưởng 25% và B hưởng 75% (tính theo wei, có giữ phần lẻ). Không tính token còn trong ví hoặc gửi thẳng vào hợp đồng staking: dùng `approve` rồi `stake` để được ghi nhận. Nếu chưa có stake, phí chờ đến khi kỳ đầu tiên có stake đóng. Không có APR cố định.
+- Khi một kỳ đóng, mỗi người hưởng `quỹ ETH chia kỳ đó × stake đang hiệu lực của mình / tổng stake đang hiệu lực`. Nếu cả kỳ chỉ có A stake 1 HCMT và B stake 3 HCMT, A hưởng 25% và B hưởng 75% (tính theo wei, có giữ phần lẻ). Không tính token còn trong ví hoặc gửi thẳng vào hợp đồng staking: dùng `approve` rồi `stake` để được ghi nhận. Nếu chưa có stake, phí chờ đến khi kỳ đầu tiên có stake đóng. Không có APR cố định.
 - **`claim(to)`** trả tất cả phần thưởng nguyên wei của các kỳ đã đóng. Người dùng tự bấm **Nhận thưởng ETH**, có thể chọn địa chỉ nhận hoặc để nhận vào ví thử. Không claim thì thưởng không mất. Claim không đổi số token đã stake.
 - **`requestUnstake(amount)`** hẹn giảm stake cho kỳ sau. **`withdrawStake(amount,to)`** nhận token đã được mở khóa, độc lập với nhận thưởng. Hết stake vẫn nhận được phần thưởng trước đó. Không chi token đang bị khóa.
 

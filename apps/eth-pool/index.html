@@ -69,6 +69,7 @@
                 <select id="destination-select" aria-describedby="destination-hint" disabled></select>
                 <p id="destination-hint" class="hint">Rút cùng mạng từ số dư note.</p>
               </div>
+              <label id="relay-choice" class="relay-choice" hidden><input type="checkbox" id="use-relayer" checked> Gửi qua relayer HCMT (không thêm phí)</label>
               <label id="recipient-label" for="recipient">Địa chỉ nhận ETH</label>
               <input id="recipient" class="address" placeholder="0x…" maxlength="42" spellcheck="false" autocapitalize="off">
               <p class="hint" id="recipient-hint">Dùng địa chỉ mới mà bạn kiểm soát.</p>
@@ -76,7 +77,7 @@
               <div class="input-unit"><input id="withdraw-amount" inputmode="decimal" maxlength="79" placeholder="Toàn bộ số dư"><span>ETH</span></div>
               <p class="hint" id="withdraw-amount-hint">Để trống để dùng toàn bộ note. Địa chỉ nhận được số ETH sau phí 0,09%.</p>
               <div id="batch-fields" hidden>
-                <label for="target">Sĩ số lô</label>
+                <label for="target">Số địa chỉ trong lô</label>
                 <input id="target" inputmode="numeric" maxlength="3" value="5" aria-describedby="batch-hint">
                 <p class="hint" id="batch-hint">Từ 5 đến 100 lượt. Nếu mức ETH đã mở lô, bạn tham gia lô đó.</p>
                 <button type="button" id="clear-selection" class="link-button" hidden>Chọn mức ETH khác</button>
@@ -134,6 +135,7 @@
         <p class="hint" id="staking-date">Mỗi mạng có hợp đồng và quỹ phí riêng.</p>
         <p class="hint">Mỗi kỳ 30 ngày, phí ETH chia theo tỷ lệ token đang stake, không tính token giữ trong ví. Thay đổi stake có hiệu lực từ kỳ sau; có thể nhận dồn nhiều kỳ.</p>
         <p class="hint" id="staking-token-note">Chỉ dùng token thử.</p>
+        <p class="hint" id="relayer-policy" hidden></p>
         <button class="secondary" type="button" id="open-staking" disabled>Tạo ví staking thử <span aria-hidden="true">↗</span></button>
         <div id="staking-user" hidden>
           <p class="hint">Ví thử: <code id="stake-account">—</code> · <b id="stake-balance">—</b> <span id="stake-symbol"></span> còn dùng được.</p>

@@ -99,7 +99,9 @@ export function localClearing(vms, arbitrumPacketGas) {
     if (v.destinationStage === Stage.Authorized) {
       if (v.liquidity < order.gross) return { ...v, issue: 'liquidity' };
       try {
-        const receipt = await destination.write(() => sent(destination.pool.connect(destination.relay).claimAcross, [order]));
+        const receipt = await destination.payoutRelayer?.active()
+          ? await destination.payoutRelayer.send('claimAcross', [order])
+          : await destination.write(() => sent(destination.pool.connect(destination.relay).claimAcross, [order]));
         r.payoutTx = receipt.hash;
       } catch {
         v = await describe(r, 'payout');

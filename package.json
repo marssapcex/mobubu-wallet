@@ -5,7 +5,8 @@
   "scripts": {
     "test": "npm --prefix hcmtrail-native test",
     "pool:eth": "node scripts/eth-pool-preview.mjs",
-    "pool:eth:legacy": "node scripts/eth-pool-preview.mjs --legacy-devnet"
+    "pool:eth:legacy": "node scripts/eth-pool-preview.mjs --legacy-devnet",
+    "pool:eth:relayer:lab": "node scripts/eth-pool-preview.mjs --legacy-devnet --hcmt-relayer"
   },
   "repository": {
     "type": "git",

@@ -3,7 +3,7 @@ import { ARBITRUM, ETHEREUM, ETH_LABS } from '/hcmtrail-native/testnet/networks.
 import { NO_PACKET_GAS, Stage, exitId, exitLeg, readRouteBackups, retryableBudget } from '/hcmtrail-native/pool/clearing.mjs';
 import { makeNoteCodec } from '/hcmtrail-native/testnet/notes-core.mjs';
 import { ETH, FEE_BPS, MIN_DEPOSIT, MAX_BACKUP_BYTES, MAX_KEY_LENGTH, decodeNoteKey, depositGrosses, directLeg, encodeNoteKey, json, need, parseAmount, parseProver, payoutAddress, poolDomain,
-  prepareProof, privateBackup, quoteFee, readBackup, reservationLeg, splitDeposit, targetCount, ticketId, validateProof } from '/hcmtrail-native/pool/protocol.mjs';
+  prepareProof, privateBackup, quoteEqualBatch, quoteFee, readBackup, reservationLeg, splitDeposit, targetCount, ticketId, validateProof } from '/hcmtrail-native/pool/protocol.mjs';
 
 const $ = (id) => document.getElementById(id);
 const hcmtSupply = 100_000n * 10n ** 18n;
@@ -62,7 +62,8 @@ function api(path, payload, network = config?.network ?? 'ethereum') {
 
 async function tx(method, args, value = 0n, target = config) {
   // Only public calldata leaves the browser. The local sponsor pays devnet gas.
-  return api('tx', { chainId: target.chainId, pool: target.pool, data: iface.encodeFunctionData(method, args), value }, target.network);
+  const endpoint = method === 'withdraw' && target.relayer?.eligible && $('use-relayer').checked ? 'relayer' : 'tx';
+  return api(endpoint, { chainId: target.chainId, pool: target.pool, data: iface.encodeFunctionData(method, args), value }, target.network);
 }
 
 async function refreshLiquidity() {
@@ -84,6 +85,7 @@ async function refreshLiquidity() {
 function updateDestination() {
   const target = destination();
   $('source-lane').textContent = config ? `· nguồn ${config.label}` : '';
+  $('relay-choice').hidden = !target || !!across() || !config?.relayer?.eligible;
   const label = target?.label ?? config?.label;
   $('recipient-label').textContent = `Địa chỉ nhận ETH${label ? ` trên ${label}` : ''}`;
   $('primary').replaceChildren(across() ? 'Tạo proof rút liên mạng' : text[mode][2], node('span', '↗'));
@@ -150,7 +152,7 @@ function pickMode(next) {
   $('withdraw-amount-hint').textContent = mode === 'smart'
     ? 'Mỗi lượt nhận cùng số ETH sau phí 0,09%. Giữ chỗ chưa bị tính phí.' : 'Để trống để dùng toàn bộ note. ETH nhận đã trừ phí 0,09%, tính theo wei.';
   $('recipient-hint').textContent = mode === 'smart'
-    ? 'Dùng địa chỉ mới. Hợp đồng nhận ETH có thể làm cả lô thất bại.' : 'Dùng địa chỉ mới mà bạn kiểm soát.';
+    ? 'Mỗi địa chỉ chỉ xuất hiện một lần trong lô. Hợp đồng từ chối nhận có thể làm cả lô thất bại.' : 'Dùng địa chỉ mới mà bạn kiểm soát.';
   select(undefined, false);
   updateWithdrawQuote();
   if (mode === 'solo' && config) refreshLiquidity().catch(() => {});
@@ -776,13 +778,20 @@ function updateWithdrawQuote() {
       text.textContent = `${title} · phí ${fmt(fee)} ETH · nhận ${fmt(gross - fee)} ETH · ${count} ${across() ? 'lệnh' : 'giao dịch rút'}. Gas thử trả riêng.`;
       return;
     }
+    if (mode === 'smart') {
+      const count = targetCount($('target').value), total = gross * BigInt(count);
+      const { fee, net, totalFee, totalNet } = quoteEqualBatch(total, count);
+      text.textContent = `Mỗi địa chỉ: ${fmt(gross)} ETH trước phí · phí ${fmt(fee)} ETH · nhận ${fmt(net)} ETH. ` +
+        `Lô ${count} địa chỉ: tổng trước phí ${fmt(total)} ETH · phí ${fmt(totalFee)} ETH · tổng nhận ${fmt(totalNet)} ETH.`;
+      return;
+    }
     const { fee, net } = quoteFee(gross);
-    text.textContent = `${title} · phí ${fmt(fee)} ETH · nhận ${fmt(net)} ETH. ${mode === 'smart'
-      ? 'Chỉ tính khi lô chi trả.' : 'Ước tính cho một note; gas thử trả riêng.'}`;
-  } catch { text.textContent = 'Nhập số ETH dương, tối đa 18 chữ số thập phân.'; }
+    text.textContent = `${title} · phí ${fmt(fee)} ETH · nhận ${fmt(net)} ETH. Ước tính cho một note; gas thử trả riêng.`;
+  } catch (e) { text.textContent = e.message; }
 }
 $('deposit-amount').oninput = updateDepositQuote;
 $('withdraw-amount').oninput = updateWithdrawQuote;
+$('target').oninput = updateWithdrawQuote;
 $('destination-select').onchange = () => {
   $('recipient').value = '';
   continuation = undefined;
@@ -897,6 +906,10 @@ async function connectNetwork(slug, data) {
   $('stake-symbol').textContent = stakeSymbol;
   $('stake-token-symbol').textContent = stakeSymbol;
   $('stake-token-address').textContent = config.stakeToken ?? '—';
+  $('relayer-policy').hidden = !config.relayer;
+  if (config.relayer) $('relayer-policy').textContent = `Relayer cần ${fmt(config.relayer.minStake)} HCMT đang stake. ` +
+    `Tối đa 50% phần phí rút, không quá ${fmt(config.relayer.rewardCap)} ETH mỗi lần chi, kể cả một lô. Không tăng phí người rút. ` +
+    'Không gửi khóa note cho relayer.';
   $('stake-amount-label').textContent = `Số ${stakeSymbol}`;
   $('open-staking').replaceChildren(`Tạo ví thử · nhận 100 ${stakeSymbol} `, node('span', '↗'));
   $('staking-token-note').textContent = stakeSymbol === 'HCMT'

@@ -224,6 +224,7 @@ test('same verified implementation on three isolated VMs; notes, fee pots and ch
     assert.equal(String(await vm.pool.homeChainId()), labId);
     assert.equal(await vm.staking.stakeToken(), vm.token.target);
     assert.equal(await vm.token.symbol(), slug === 'ethereum' ? 'HCMT' : 'LAB');
+    assert.equal(await vm.staking.relayEnabled(), slug === 'ethereum');
     if (slug === 'ethereum') {
       assert.equal(await vm.token.totalSupply(), parseEther('100000'));
       assert.equal(await vm.token.balanceOf(await vm.signer.getAddress()), parseEther('100000'));

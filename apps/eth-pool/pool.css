@@ -49,6 +49,8 @@ h2 { color:var(--text); font-size:23px; font-weight:740; line-height:1.2; letter
 label { display:block; font-size:13px; font-weight:700; margin:14px 0 6px; }
 label span { color:var(--dim); font-weight:500; }
 input { display:block; width:100%; color:var(--text); background:#0b1510; border:1px solid #32463b; border-radius:9px; padding:11px 12px; outline:none; }
+.relay-choice:not([hidden]) { display:flex; gap:8px; align-items:center; }
+.relay-choice input { width:auto; accent-color:var(--mint); }
 input::placeholder { color:#748b7c; }
 input:read-only:not([type="file"]) { color:var(--mint); }
 input[type="file"] { padding:9px; font-size:12px; }

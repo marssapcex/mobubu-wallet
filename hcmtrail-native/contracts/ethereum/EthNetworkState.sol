@@ -146,7 +146,7 @@ abstract contract EthNetworkState is EthPoolState {
         exitStage[id] = Stage.Paid;
         liquidityNative -= o.gross;
         (uint256 fee, uint256 net) = quoteFee(o.gross);
-        _fundFee(fee);
+        _fundPayoutFee(fee);
         (bool ok,) = o.recipient.call{value: net}("");
         if (!ok) revert PayoutFailed(0);
         emit ExitPaid(id, o.recipient, net, fee);

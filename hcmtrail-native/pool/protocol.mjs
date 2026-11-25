@@ -60,6 +60,17 @@ export function quoteFee(gross) {
   return { fee, net: gross - fee };
 }
 
+/// Quote equal payments in integer wei, never redistribute a remainder to one
+/// address. The vault takes the per-ticket gross and rounds the fee once per ticket.
+export function quoteEqualBatch(total, recipients) {
+  total = uint(total, U256, 'batch gross wei');
+  const count = BigInt(targetCount(String(recipients)));
+  need(total > 0n && total % count === 0n, 'Tổng ETH trước phí phải chia hết theo wei cho số địa chỉ.');
+  const gross = total / count;
+  const { fee, net } = quoteFee(gross);
+  return { gross, fee, net, totalFee: fee * count, totalNet: net * count };
+}
+
 export function directLeg(recipient, gross, staking) {
   gross = uint(gross, MAX_PART, 'withdrawal wei');
   const { fee, net } = quoteFee(gross);

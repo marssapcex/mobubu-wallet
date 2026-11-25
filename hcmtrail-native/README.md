@@ -12,4 +12,4 @@ Một mã pool ETH trên Ethereum (`31337` lab), Arbitrum One (`31338`) và Base
 | [`HcmtToken`](contracts/ethereum/HcmtToken.sol) | ERC-20, 18 decimals, cấp một lần 100.000 HCMT. Không có owner, mint thêm, burn hay nâng cấp. |
 | [`NativeStark`](contracts/vault/NativeStark.sol) | Pinned NotBefore A trên devnet. `build`/`build:pool`/`pool:eth` mặc định chặn release. [HCFR v2](docs/ETH-POOL-STARK256.md) chỉ là nghiên cứu FRI. |
 
-[Luồng sáu chiều](docs/ETH-CLEARING.md) · [Runbook khóa note](docs/ETH-POOL.md) · [Staking](docs/ETH-FEE-STAKING.md) · [Verifier pins](docs/VAULTS.md).
+[Luồng sáu chiều](docs/ETH-CLEARING.md) · [Runbook khóa note](docs/ETH-POOL.md) · [Staking](docs/ETH-FEE-STAKING.md) · [Relayer HCMT và lô 20 địa chỉ](docs/ETH-RELAYER.md) · [Verifier pins](docs/VAULTS.md).

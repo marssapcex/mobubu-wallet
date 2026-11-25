@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.24;
 
+import {HcmtToken} from "./HcmtToken.sol";
+
 interface IStakeToken {
     function balanceOf(address owner) external view returns (uint256);
     function transfer(address to, uint256 amount) external returns (bool);
@@ -13,7 +15,11 @@ interface IStakeToken {
 contract EthFeeStaking {
     uint256 public constant PERIOD = 30 days;
     uint256 private constant SCALE = 1 << 128;
+    uint256 public constant MIN_RELAY_STAKE = 100 ether; // 100 HCMT (18 decimals)
+    uint256 public constant MAX_RELAY_REWARD = 0.003 ether; // per successful payout; one cap per batch
     uint256 public immutable start;
+    address public immutable feeSource;
+    bool public immutable relayEnabled;
     IStakeToken public immutable stakeToken;
 
     uint64 public settledEpoch;
@@ -23,6 +29,9 @@ contract EthFeeStaking {
     uint128 public fundedWei;
     uint128 public claimedWei;
     uint256 public rewardIndex;
+    uint256 public relayFundedWei;
+    uint256 public relayClaimedWei;
+    mapping(address relayer => uint256 amount) public relayCredit;
     uint256 private undistributed;
     bool private entered;
 
@@ -52,6 +61,8 @@ contract EthFeeStaking {
     event ExitScheduled(address indexed account, uint64 indexed epoch, uint128 amount);
     event StakeWithdrawn(address indexed account, address indexed to, uint128 amount);
     event RewardClaimed(address indexed account, address indexed to, uint256 amount);
+    event RelayRewardCredited(address indexed executor, uint256 totalFee, uint256 reward);
+    event RelayRewardClaimed(address indexed executor, address indexed to, uint256 reward);
 
     error InvalidToken();
     error InvalidAmount();
@@ -59,10 +70,15 @@ contract EthFeeStaking {
     error TokenTransferFailed();
     error EthTransferFailed();
     error Reentrant();
+    error InvalidFeeSource();
 
     constructor(address token) {
         if (token.code.length == 0) revert InvalidToken();
         stakeToken = IStakeToken(token);
+        feeSource = msg.sender;
+        // Only the Ethereum lab uses HCMT. Synthetic LAB on the other two
+        // lanes never qualifies for relay rewards. No token/admin can opt in.
+        relayEnabled = block.chainid == 31337 && token.codehash == keccak256(type(HcmtToken).runtimeCode);
         start = block.timestamp;
     }
 
@@ -80,13 +96,57 @@ contract EthFeeStaking {
     /// @notice Pool fees go straight into the current epoch. The same entry point
     /// accepts voluntary ETH funding. Forced ETH does not create rewards.
     function fundFees() external payable nonReentrant {
+        _fundFees(msg.value);
+    }
+
+    function relayEligible(address executor) public view returns (bool) {
+        if (!relayEnabled) return false;
+        Position storage p = positions[executor];
+        uint128 active = p.changesAt != 0 && p.changesAt <= currentEpoch() ? p.next : p.active;
+        return active >= MIN_RELAY_STAKE;
+    }
+
+    function quoteRelayReward(address executor, uint256 totalFee) public view returns (uint256) {
+        if (!relayEligible(executor)) return 0;
+        uint256 reward = totalFee / 2;
+        return reward > MAX_RELAY_REWARD ? MAX_RELAY_REWARD : reward;
+    }
+
+    /// @notice Only the pool calls this for actual payouts, once per batch.
+    /// The user pays the same fee with or without a relayer. Deposits, refunds
+    /// and message delivery have no rebate. No calls to relayer code here.
+    function fundPayoutFees(address executor) external payable nonReentrant {
+        if (msg.sender != feeSource) revert InvalidFeeSource();
+        uint256 reward = quoteRelayReward(executor, msg.value);
+        _fundFees(msg.value - reward);
+        if (reward != 0) {
+            relayCredit[executor] += reward;
+            relayFundedWei += reward;
+            emit RelayRewardCredited(executor, msg.value, reward);
+        }
+    }
+
+    /// Claim earned relay credit independently of the monthly staking reward.
+    /// Exiting stake disables future rebates, not these earned credits.
+    function claimRelayReward(address payable to) external nonReentrant returns (uint256 amount) {
+        _checkRecipient(to);
+        amount = relayCredit[msg.sender];
+        if (amount == 0) return 0;
+        relayCredit[msg.sender] = 0;
+        relayClaimedWei += amount;
+        (bool ok,) = to.call{value: amount}("");
+        if (!ok) revert EthTransferFailed();
+        emit RelayRewardClaimed(msg.sender, to, amount);
+    }
+
+    function _fundFees(uint256 amount) private {
         // The lifetime bound ensures all scaled values, including the sum of every
         // index increment, fit in 256 bits even with only one unit of stake.
-        if (msg.value == 0 || msg.value > type(uint128).max - fundedWei) revert InvalidAmount();
+        if (amount == 0 || amount > type(uint128).max - fundedWei) revert InvalidAmount();
         _roll();
-        fundedWei += uint128(msg.value);
-        undistributed += msg.value * SCALE;
-        emit FeesFunded(settledEpoch, msg.sender, msg.value);
+        fundedWei += uint128(amount);
+        undistributed += amount * SCALE;
+        emit FeesFunded(settledEpoch, msg.sender, amount);
     }
 
     function checkpoint() external nonReentrant {

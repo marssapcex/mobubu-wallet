@@ -3,13 +3,17 @@ import { createHash, randomBytes } from 'node:crypto';
 import { readFile, stat } from 'node:fs/promises';
 import { ARBITRUM, ETHEREUM, ETH_LABS, TX_GAS_CAP } from '../hcmtrail-native/testnet/networks.mjs';
 import { localClearing } from '../hcmtrail-native/pool/local-clearing.mjs';
+import { startLabRelayer } from '../hcmtrail-native/pool/relayer.mjs';
 import { ETH_POOL_LEGACY } from '../hcmtrail-native/pool/lab-profile.mjs';
 import { ETH_POOL_RELEASE_POLICY, requireEthPoolRelease } from '../hcmtrail-native/pool/release-policy.mjs';
 
 // Ephemeral EVMs only. Never connect a wallet/RPC or accept note openings.
 const args = process.argv.slice(2);
 if (!args.length || (args.length === 1 && args[0] === '--require-256')) requireEthPoolRelease();
-if (args.length !== 1 || args[0] !== '--legacy-devnet') throw new Error('Usage: npm run pool:eth:legacy (legacy lab only, no release mode)');
+const withRelayer = args[1] === '--hcmt-relayer';
+if (args.length !== (withRelayer ? 2 : 1) || args[0] !== '--legacy-devnet') {
+  throw new Error('Usage: npm run pool:eth:legacy or npm run pool:eth:relayer:lab (local only).');
+}
 
 const [{ Wallet, parseEther, keccak256 }, { deployEthNetwork }, { readPool }, { settleReady }, { json, MIN_DEPOSIT, payoutAddress }] = await Promise.all([
   import('ethers'), import('../hcmtrail-native/pool/local.mjs'), import('../hcmtrail-native/pool/view.mjs'),
@@ -19,7 +23,7 @@ const base = new URL('../', import.meta.url);
 const app = 'apps/eth-pool/';
 const native = 'hcmtrail-native/';
 const bin = `${native}build/eth-pool/`;
-const port = Number(process.env.PORT ?? 4184);
+const port = Number(process.env.PORT ?? (withRelayer ? 4186 : 4184));
 if (!Number.isInteger(port) || port < 1024 || port > 65535) throw new Error('Invalid ETH pool port');
 const wasm = await stat(new URL(`${bin}prover.wasm`, base)).then((s) => s.isFile()).catch(() => false);
 const cache = process.env.POOL_PERIODIC_CACHE ? await readFile(process.env.POOL_PERIODIC_CACHE) : null;
@@ -28,8 +32,10 @@ if (cache && cache.length !== 8_388_660) throw new Error('Expected the public No
 const opts = { gasLimit: TX_GAS_CAP };
 const sent = async (fn, ...a) => (await fn(...a, opts)).wait();
 const labs = new Map();
-const networkSet = await deployEthNetwork({ vmOptions: () => ({
-  genesisBlockTime: BigInt(Math.floor(Date.now() / 1000)), balance: parseEther('1000000'),
+const now = BigInt(Math.floor(Date.now() / 1000));
+const networkSet = await deployEthNetwork({ vmOptions: ({ lane }) => ({
+  // Give the designated local operator one simulated epoch before serving HTTP.
+  genesisBlockTime: withRelayer && lane === ETHEREUM ? now - 2_592_000n : now, balance: parseEther('1000000'),
   keys: Array.from({ length: 3 }, () => `0x${randomBytes(32).toString('hex')}`),
 }) });
 const arbVm = networkSet.get(ETH_LABS.find((n) => n.lane === ARBITRUM).slug);
@@ -55,7 +61,21 @@ for (const network of ETH_LABS) {
     return next;
   };
   const read = (snapshot = false) => readPool(pool, provider, fromBlock, { snapshot });
-  labs.set(network.slug, { ...vm, lane, config, write, read, relay: await provider.getSigner(1), keeper: await provider.getSigner(2),
+  const keeper = await provider.getSigner(2);
+  let payoutRelayer;
+  if (withRelayer && lane === ETHEREUM) {
+    const stake = await staking.MIN_RELAY_STAKE();
+    // No new HCMT issuance, and no API that can advance time or sign arbitrary txs.
+    await sent(token.transfer, keeper.address, stake);
+    await sent(token.connect(keeper).approve, staking.target, stake);
+    await sent(staking.connect(keeper).stake, stake);
+    const deadline = await staking.start() + await staking.PERIOD();
+    await provider.send('evm_setNextBlockTimestamp', [Number(deadline)]);
+    await provider.send('evm_mine', []);
+    payoutRelayer = await startLabRelayer({ pool, staking, signer: keeper, write });
+    config.relayer = await payoutRelayer.status();
+  }
+  labs.set(network.slug, { ...vm, lane, config, write, read, relay: await provider.getSigner(1), keeper, payoutRelayer,
     deposits: new Map(), sessions: new Map(), pending: 0, keeping: false });
 }
 const clearing = localClearing(labs, arbitrumPacketGas);
@@ -206,10 +226,14 @@ async function submit(req, res, vm, operation, routeId) {
   if (vm.pending >= 5) return response(res, { error: 'Devnet đang bận. Thử lại sau.' }, 429);
   ++vm.pending;
   try {
-    const b = await body(req, operation === 'tx' ? 270_000 : 2048);
+    const b = await body(req, ['tx', 'relayer'].includes(operation) ? 270_000 : 2048);
     if (operation === 'route') {
       if (Object.keys(b).join(',') !== 'action' || b.action !== 'advance') throw new Error('Chỉ được xử lý tiếp lệnh đã xác nhận.');
       return response(res, await clearing.advance(vm, routeId));
+    }
+    if (operation === 'relayer') {
+      const receipt = await vm.payoutRelayer.submit(b);
+      return response(res, { hash: receipt.hash, block: receipt.blockNumber, gas: receipt.gasUsed });
     }
     const result = operation === 'tx' ? await submitPool(b, vm) : await submitStaking(b, vm, ticket(req));
     response(res, result);
@@ -224,11 +248,14 @@ const timer = setInterval(() => {
     vm.keeping = true;
     (async () => {
       await vm.write(() => vm.provider.send('evm_mine', []));
-      await settleReady({ pool: vm.pool, read: vm.read, send: (name, a) => vm.write(async () => {
-        const execute = vm.pool.connect(vm.keeper)[name];
-        await execute.staticCall(...a, opts);
-        return sent(execute, ...a);
-      }) });
+      await settleReady({ pool: vm.pool, read: vm.read, send: async (name, a) => {
+        if (await vm.payoutRelayer?.active()) return vm.payoutRelayer.send(name, a);
+        return vm.write(async () => {
+          const execute = vm.pool.connect(vm.relay)[name];
+          await execute.staticCall(...a, opts);
+          return sent(execute, ...a);
+        });
+      } });
     })().catch(() => {}).finally(() => { vm.keeping = false; });
   }
 }, 3000);
@@ -236,6 +263,12 @@ timer.unref();
 
 const server = createServer(async (req, res) => {
   try {
+    if (req.url === '/api/ethereum/relayer') {
+      const vm = labs.get('ethereum');
+      if (!vm.payoutRelayer) return response(res, { error: 'Relayer HCMT chưa bật.' }, 404);
+      if (req.method === 'GET') return response(res, await vm.payoutRelayer.status());
+      return await submit(req, res, vm, 'relayer');
+    }
     if (req.url === '/api/liquidity') {
       if (req.method !== 'GET') return response(res, { error: 'Chỉ đọc thanh khoản.' }, 405);
       return response(res, await liquidityBook());

@@ -14,7 +14,7 @@ RUSTC="$(rustup which --toolchain 1.88.0 rustc)" npm --prefix hcmtrail-native ru
 npm run pool:eth:legacy
 ```
 
-Mở preview **4184** (chạy tại máy: `http://localhost:4184`). Chọn mạng nạp trong thanh mạng lab. Khi rút, khóa note xác định mạng nguồn; chọn mạng nhận trong form. Trình duyệt cần Web Workers, WebAssembly, `JSON.rawJSON` và `crypto.getRandomValues`. Prover cục bộ có thể mất vài phút. `POOL_PERIODIC_CACHE` tùy chọn trỏ tới cache **tham số công khai** `periodic.top` của prover ghim; không đặt khóa hoặc witness vào biến này. Khởi động lại lab tạo ba deployment mới; khóa note thử của phiên cũ không được di trú. Giao diện không cần kết nối ví tiền thật.
+Mở preview thường **4184**. Để dùng [relayer HCMT](ETH-RELAYER.md), chạy `npm run pool:eth:relayer:lab` và mở preview **4186**. Chọn mạng nạp trong thanh mạng lab. Khi rút, khóa note xác định mạng nguồn; chọn mạng nhận trong form. Trình duyệt cần Web Workers, WebAssembly, `JSON.rawJSON` và `crypto.getRandomValues`. Prover cục bộ có thể mất vài phút. `POOL_PERIODIC_CACHE` tùy chọn trỏ tới cache **tham số công khai** `periodic.top` của prover ghim; không đặt khóa hoặc witness vào biến này. Khởi động lại lab tạo ba deployment mới; khóa note thử của phiên cũ không được di trú. Giao diện không cần kết nối ví tiền thật.
 
 ## Nạp, rút và hoàn
 
@@ -22,14 +22,14 @@ Mở preview **4184** (chạy tại máy: `http://localhost:4184`). Chọn mạn
 | --- | --- |
 | **Nạp** | Nhập ít nhất **0,01 ETH trước phí**. Ghi lại khóa `hceth3.…` hoặc tải file note JSON rồi xác nhận. Note ghi có đúng số wei sau phí. |
 | **Rút ngay** | Dán khóa note, bấm **Mở khóa**. Ứng dụng chọn đúng mạng nguồn. Chọn **Mạng nhận ETH** rồi nhập địa chỉ trên mạng nhận; để trống số lượng để dùng hết note. Rút liên mạng cần thanh khoản ở đích, và luôn yêu cầu lưu khóa mới có note hoàn trước khi gửi proof. |
-| **Rút thông minh** | Chọn lô hoặc mức ETH **trước phí** và sĩ số 5–100. Chỉ lượt góp đủ và qua verifier được đếm. Khi đủ lượt, một giao dịch trả cả lô; tất cả nhận cùng số ETH sau phí. |
+| **Rút thông minh** | Chọn lô hoặc mức ETH **trước phí** và sĩ số 5–100. Chỉ lượt góp đủ và qua verifier được đếm. Khi đủ lượt cho các địa chỉ khác nhau, một giao dịch trả cả lô; từng địa chỉ nhận đúng cùng số wei. Ví dụ `0,5 ETH` × `20` lượt trả `0,49955 ETH` đến từng địa chỉ. |
 | **Hoàn về note** | Lô hết 24 giờ chưa trả hoặc phần chưa đủ của lô đã chi có thể được hoàn. Với lệnh liên mạng đã xác thực nhưng chưa chi, có thể **Hủy lệnh và hoàn về note**. Mở lại bản sao đã lưu để xử lý tiếp, không cần tạo proof cho cùng lệnh. Không thu phí lúc giữ chỗ hoặc khi hoàn. |
 
 Khóa note không phải private key ví. Đó là bản sao **không mã hóa** gồm bí mật mở note, giá trị và miền của deployment; checksum phát hiện chép nhầm chứ không thay quyền chi. Ai có khóa/file đều có thể chi note. Không dán seed phrase hoặc khóa ví thật. Không gửi khóa note qua chat hay máy chủ. Giao diện chỉ gửi calldata công khai, tạo và kiểm proof trong trình duyệt, không lưu khóa note vào local/session storage. Nếu bị mất khóa note, không có admin khôi phục.
 
 ## Phí và số dư
 
-`fee = floor(grossWei × 9 / 10.000)`, `net = grossWei − fee`. Ví dụ nạp 1 ETH tạo note **0,9991 ETH**; rút hết note nhận **0,99820081 ETH**. Phí nạp là 0,0009 ETH, phí rút là 0,00089919 ETH, gas trả riêng. Phí chuyển thẳng vào [staking](ETH-FEE-STAKING.md) tại mạng nạp hoặc mạng thực sự chi trả. Khoản dưới 1.112 wei có phí 0 wei.
+`fee = floor(grossWei × 9 / 10.000)`, `net = grossWei − fee`. Ví dụ nạp 1 ETH tạo note **0,9991 ETH**; rút hết note nhận **0,99820081 ETH**. Phí nạp là 0,0009 ETH, phí rút là 0,00089919 ETH, gas trả riêng. Phí vào [staking](ETH-FEE-STAKING.md) tại mạng nạp hoặc mạng thực sự chi trả. Khi có [relayer đạt điều kiện](ETH-RELAYER.md), phí rút được phân giữa quỹ staking và tín dụng relayer; số ETH người dùng nhận không đổi. Khoản dưới 1.112 wei có phí 0 wei.
 
 - Mỗi giao dịch nạp thu phí một lần, rồi chia **net** thành một hoặc nhiều note. `depositBatch` chỉ chấp nhận cung cấp cam kết tổng đúng net.
 - Rút riêng chứng minh tổng `net + fee` được tiêu, đồng thời bind `net`, `fee`, người nhận, địa chỉ staking cố định và change trong statement. Không thể đổi đích hoặc sửa phí bằng cách gửi lại calldata. Nếu một giao dịch revert, không mất note hay phí.

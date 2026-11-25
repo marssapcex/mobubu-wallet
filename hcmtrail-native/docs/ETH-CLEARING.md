@@ -5,7 +5,7 @@
 ## Kế toán
 
 - Phí nạp **0,09%** vào staking nguồn. Note được ghi **sau phí**. Rút tính thêm **0,09%** trên `gross` thực sự tiêu từ note: `fee = floor(gross × 9 / 10.000)`, người nhận được `gross − fee`. Nạp 1 ETH, rút hết một note: **0,99820081 ETH**, chưa tính gas.
-- `fundLiquidity` cấp ETH rõ ràng cho quỹ **`liquidityNative`**. Đây chưa phải cổ phần LP có quyền rút. Không dùng `shieldedNative`, `reservedNative` hoặc ETH gửi ép để trả lệnh từ mạng khác. Đích cần **đủ `gross`** để trả cả net lẫn phí vào staking ở đích.
+- `fundLiquidity` cấp ETH rõ ràng cho quỹ **`liquidityNative`**. Đây chưa phải cổ phần LP có quyền rút. Không dùng `shieldedNative`, `reservedNative` hoặc ETH gửi ép để trả lệnh từ mạng khác. Đích cần **đủ `gross`** để trả cả net lẫn phí ở đích. Khi [relayer HCMT](ETH-RELAYER.md) trả tại Ethereum lab, tín dụng relayer trích từ phí rút, không giảm thêm net.
 - Sau khi đích xác nhận đã trả, gross đã giữ ở nguồn chuyển thành thanh khoản **tại nguồn**. Có thể phục vụ lệnh chiều ngược lại; nếu các luồng lệch về một hướng, pool đích có thể hết thanh khoản. Địa chỉ nhận chỉ nhận ETH, không nhận IOU hay nợ.
 - `balance(pool) ≥ shieldedNative + reservedNative + outboundNative + liquidityNative`. Mỗi lần cấp vốn, khóa, trả hoặc hoàn cập nhật đúng ngăn tương ứng. ETH dành trả gas retryable không nằm trong các ngăn này.
 
@@ -17,7 +17,7 @@
 4. Khi đã xác thực, `claimAcross` được gọi bởi bất kỳ ai nhưng chỉ trả đến địa chỉ bind. Thiếu `liquidityNative` thì vẫn `Authorized`, không mất phí và có thể thử lại sau khi quỹ được nạp. Đọc mức thanh khoản trước khi khóa hữu ích nhưng không phải đặt chỗ. Nhiều lệnh hợp lệ cạnh tranh cùng quỹ; không hứa thứ tự hay trả ngay.
 5. Nếu muốn hủy lệnh đang `Authorized`, dùng bí mật riêng trong `cancelAcross` ở đích. Trạng thái `Paid` và `Cancelled` loại trừ nhau. `publishOutcome` gửi kết quả theo đường ngược. Sau `Paid`, nguồn đổi tiền đã khóa thành thanh khoản nguồn; sau `Cancelled`, `refundAcross` khôi phục **đủ gross vào note đã bind**, không thu phí rút. Chỉ thời gian trôi ở nguồn không đủ để hoàn tiền, vì đích có thể đã trả. Gửi lại packet không gây chi hoặc ghi có lần hai. Chậm/mất kênh xác thực có thể kéo dài khoản đang khóa.
 
-## Dùng preview 4184
+## Dùng preview thường 4184 hoặc relayer HCMT 4186
 
 1. Dựng WASM và mở lab theo [runbook](ETH-POOL.md). Mỗi VM được cấp **2 ETH thử** vào quỹ tự do lúc khởi động; đây không phải note và không sinh phí nạp.
 2. Vào **Rút ngay**, dán khóa `hceth3` và **Mở khóa**. Mạng nguồn tự nhận theo khóa. Chọn **Mạng nhận ETH** và nhập địa chỉ nhận trên mạng đó. Giao diện đọc quỹ tự do từ hợp đồng và hiện gross, phí, net; gas lab được tài trợ riêng. Có thể rút cùng mạng mà không dùng quỹ này. **Rút thông minh** vẫn là lô nội mạng.
@@ -43,9 +43,10 @@ npm --prefix hcmtrail-native run test:routes:fresh
 
 | Kiểm thử | Kết quả |
 | --- | --- |
-| `npm test` | 21/21. Ma trận 6/6 hướng dùng proof fixture, có kiểm số dư ETH thực trong VM, phí/dust, thiếu thanh khoản, hủy hoàn và chống phát lại. |
+| `npm test` | Ma trận 6/6 hướng dùng proof fixture, có kiểm số dư ETH thực trong VM, phí/dust, thiếu thanh khoản, hủy hoàn và chống phát lại. |
 | `test:routes:fresh` | Ethereum → Base, proof STARK WASM thật. Nạp `1000000000000000017`, note `999100000000000017`, địa chỉ đích nhận `998200810000000017` wei. Staking Base nhận `899190000000000` wei. Giao dịch khóa proof dùng `8460350` gas; proof `95656` byte trong lần chạy này. |
 | Chromium, preview 4184 | Base → Ethereum → Arbitrum One, proof thật trong trình duyệt. Thử ngắt bước chuyển tiếp rồi tải lại trang và xử lý tiếp qua khóa đã lưu. Đích nhận phần net, staking ở nguồn chỉ nhận phí nạp; không upload khóa note. |
+| `test:relayer:fresh` | Arbitrum One → Ethereum với proof WASM thật. Ví đích nhận `998200810000000017` wei. Từ phí rút `899190000000000` wei, relayer 100 HCMT nhận `449595000000000` wei tín dụng. Proof `96456` byte, tạo trong 221,2 s; khóa ở nguồn `8456164` gas, chi ở đích `219918` gas trong lần chạy này. |
 | `test:pool:key` | Rút cùng mạng Ethereum bằng proof thật và nhận phần phí của HCMT stake sau khi kỳ đóng. |
 
 **Giới hạn:** Nhánh đúng 1 wei dùng tag và một địa chỉ tổng hợp để ràng buộc 222 bit của digest; đây là tương thích với circuit lab, không phải thiết kế đã đạt ngưỡng phát hành. Route ID, số tiền, địa chỉ nhận và dấu thời gian vẫn quan sát được. Không gộp nhiều chain thành một giao dịch nguyên tử. Để phát hành cần verifier chi note đạt yêu cầu [256 bit cổ điển + đánh giá lượng tử](ETH-POOL-STARK256.md), manifest peer/hệ thống xác thực được kiểm tra, kiểm thử finality/challenge/retryable thực tế, và rà soát kế toán/thanh khoản độc lập. Không có quyền admin để cấp quyền rút hay quét tiền; đây không phải hệ thống đã được kiểm toán hoặc thanh khoản thật.

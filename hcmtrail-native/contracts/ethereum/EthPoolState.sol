@@ -39,6 +39,7 @@ abstract contract EthPoolState is NativeNoteDepositsCore {
         uint8 target;
         bool paid;
         bytes32[] entries; // only completely funded tickets count
+        mapping(address recipient => bool) queuedRecipient;
     }
     struct Ticket {
         uint256 funded;
@@ -131,7 +132,7 @@ abstract contract EthPoolState is NativeNoteDepositsCore {
         _recipient(to);
         (uint256 fee, uint256 net) = quoteFee(gross);
         _consume(proof, spend, uint64(net), uint64(fee), 0, to, fee == 0 ? address(0) : address(feeStaking));
-        _fundFee(fee);
+        _fundPayoutFee(fee);
         (bool ok,) = to.call{value: net}("");
         if (!ok) revert PayoutFailed(0);
         emit Paid(spend.nullifiers[0], to, gross, uint64(net), uint64(fee));
@@ -139,6 +140,10 @@ abstract contract EthPoolState is NativeNoteDepositsCore {
 
     function _fundFee(uint256 fee) internal {
         if (fee != 0) feeStaking.fundFees{value: fee}();
+    }
+
+    function _fundPayoutFee(uint256 fee) internal {
+        if (fee != 0) feeStaking.fundPayoutFees{value: fee}(msg.sender);
     }
 
     function getBatch(uint256 amount, uint64 round) external view returns (uint64 expiresAt, uint8 target, uint8 count, bool paid) {
@@ -168,6 +173,8 @@ abstract contract EthPoolState is NativeNoteDepositsCore {
         t.funded += value;
         ++t.parts;
         if (t.funded == terms.amount) {
+            if (b.queuedRecipient[terms.recipient]) revert InvalidBatch();
+            b.queuedRecipient[terms.recipient] = true;
             t.recipient = terms.recipient;
             b.entries.push(id);
             emit TicketQueued(terms.amount, terms.round, id);
@@ -188,7 +195,7 @@ abstract contract EthPoolState is NativeNoteDepositsCore {
         uint64 release;
         for (uint256 i; i < n; ++i) release += tickets[b.entries[i]].parts;
         reservedRefundLeaves -= release;
-        _fundFee(fee * n); // charge each completed withdrawal, not each proof
+        _fundPayoutFee(fee * n); // equal per ticket, with one bounded relayer rebate for the batch
         for (uint256 i; i < n; ++i) {
             (bool ok,) = tickets[b.entries[i]].recipient.call{value: net, gas: BATCH_RECEIVE_GAS}("");
             if (!ok) revert PayoutFailed(i);
