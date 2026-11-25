@@ -10,8 +10,10 @@ Ngày: 2026-11-18 · Nhánh `arena/32000e7e-mobubu-wallet` · Phạm vi: **chỉ
 - **Không phát hiện lỗi mất tiền trực tiếp** trong lớp kế toán Solidity đã đọc.
   Có **1 phát hiện mức trung bình** (khoá làn rút lô tạm thời), vài phát hiện mức thấp
   và thông tin.
-- **Echidna chưa chạy được** trong sandbox (asset phát hành bị chặn); **Medusa** đang
-  dựng từ tag nguồn v1.5.1. Cả hai **không** được tính vào kết quả.
+- **Echidna chưa chạy được** trong sandbox (asset phát hành bị chặn, không có GHC/Stack).
+  **Medusa v1.5.1 không dựng xong** từ tag nguồn (closure module Go không khép kín được
+  chỉ bằng archive GitHub). Cả hai **không** được tính vào kết quả; harness và cấu hình
+  đã sẵn sàng để chạy ở máy có mạng.
 - **Không** có kết luận nào về tính đúng của STARK: verifier trong các test này là
   fixture (`keccak256(abi.encode(words))`). Không có phê duyệt lưu ký công khai.
 
@@ -146,10 +148,21 @@ chỉ "khó tính" chặn được lô (người nhận do chính người nạp
 
 ## 5. Khoảng trống và rủi ro chưa kiểm
 
-1. **Echidna chưa chạy.** Không có kết quả. Cấu hình đã chuẩn bị (`audit/echidna.yaml`).
-2. **Medusa** dựng từ tag `v1.5.1`; tới thời điểm viết báo cáo chưa có binary chạy được
-   trong sandbox (asset phát hành bị chặn, dựng nguồn cần 347 module Go công khai).
-   Không có kết quả Medusa trong báo cáo này.
+1. **Echidna 2.4.0 chưa chạy.** Asset `echidna-2.4.0-x86_64-linux.tar.gz`
+   (id `710402563`, SHA-256 `a77a90501dd6269e12807156e9d409b160ce0c87fbb36fe323a896a4fb7a2d1d`)
+   bị chặn cùng CDN; sandbox không có GHC/Stack để dựng từ Haskell. Cấu hình đã chuẩn bị
+   (`audit/echidna.yaml`) và harness đã được kiểm bằng Forge trên cùng mã nguồn Solidity.
+   Chạy ở máy có mạng: `docker run -v $PWD:/src ghcr.io/crytic/echidna:latest echidna
+   build/audit/medusa-target/StatefulProperties.sol --config audit/echidna.yaml`.
+2. **Medusa**: asset `medusa-linux-x64.tar.gz` (id `371539722`, SHA-256
+   `ddfe1517ae9028ef9fc331b00f5a6a9d5406f3fcd11a715d60c6b6fb3e4546d3`) nằm trên
+   `release-assets.githubusercontent.com` — sandbox chỉ mở `github.com`,
+   `codeload.github.com`, `api.github.com`, npm, PyPI. Dựng từ tag nguồn đã đi được
+   348 thay thế module nhưng dừng ở các module có đường dẫn import khác repo
+   (`decred/dcrd` submodule, `holiman/bloomfilter/v2`). Không có kết quả Medusa.
+   Chạy ở máy có mạng: `go install github.com/crytic/medusa@v1.5.1` rồi
+   `medusa --config audit/medusa.json` (mục tiêu `build/audit/medusa-target`).
+   Hoặc `docker run -v $PWD:/src ghcr.io/crytic/medusa:latest`.
 3. **Halmos không dựng được** trạng thái pool (constructor tạo hợp đồng lồng nhau).
    Các tính chất của pool chỉ được kiểm bằng fuzz + lập luận số học.
 4. **Verifier STARK** không được kiểm: mọi proof trong test là fixture băm `words`.

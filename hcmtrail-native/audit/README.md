@@ -12,7 +12,7 @@ hợp đồng production nào bị sửa. Mọi thư mục sinh ra (`hcmtrail-na
 | `solc` native | 0.8.24+commit.e11b9ed9.Linux.g++ | `ethereum/solc-bin` raw + SHA-256 trong `list.json` | chạy được |
 | Halmos | 0.3.3 | PyPI, venv riêng | chạy được (kèm `z3`, `yices`) |
 | `crytic-compile` | 0.4.2 | PyPI | đã cài (dùng cho Medusa/Echidna) |
-| Medusa | v1.5.1 (dựng từ tag nguồn) | `codeload.github.com/crytic/medusa` | xem mục "Chặn" |
+| Medusa | v1.5.1 | `codeload.github.com/crytic/medusa` (dựng nguồn) | **chưa dựng xong** — xem mục "Chặn" |
 | Echidna | 2.4.0 | asset phát hành `echidna-2.4.0-x86_64-linux.tar.gz` | **chưa cài được** |
 
 `build/audit/bin/solc` chỉ dùng khi chạy offline; đường dẫn tuyệt đối trong
@@ -24,9 +24,11 @@ snapshot là `/home/user/mobubu-wallet/hcmtrail-native/build/audit/bin`.
   `release-assets.githubusercontent.com`; sandbox chỉ mở `github.com`,
   `codeload.github.com`, `api.github.com`, npm và PyPI. Tải asset trả về
   0 byte hoặc lỗi TLS. Vì vậy Echidna **chưa được chạy**.
-- Medusa được dựng từ tag nguồn với module Go ghim qua `codeload`. Cần 347
-  thay thế module cục bộ (130 module chỉ dùng cho test/CGO bị bỏ). Tiến trình
-  dựng lặp lại (`build/audit/build-medusa.py`) ghi log từng vòng.
+- Medusa được dựng từ tag nguồn với module Go ghim qua `codeload`. Đã đi tới 348
+  thay thế module cục bộ nhưng dừng ở các module mà đường dẫn import không trùng
+  repo (`github.com/decred/dcrd/dcrec/secp256k1/v4` nằm trong submodule `decred/dcrd`,
+  `github.com/holiman/bloomfilter/v2`). Script dựng lặp lại vẫn còn trong
+  `build/audit/build-medusa.py` nếu chạy ở máy có `GOPROXY` thật.
 - Halmos không dựng được trạng thái cho harness pool: `setUp()` tạo hợp đồng
   lồng trong constructor (`EthPoolState` → `new EthFeeStaking`), Halmos báo
   `No successful path found in setUp()`. Các test tượng trưng cho `HcmtToken`
