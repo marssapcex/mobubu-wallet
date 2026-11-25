@@ -1,0 +1,23 @@
+# Echidna 2.4.0 configuration for the shared stateful target.
+# The Echidna release binary could not be downloaded in the audit sandbox, so this
+# file is a prepared configuration, not an executed campaign.
+testMode: property
+prefix: "echidna_"
+contract: StatefulProperties
+testLimit: 2000000
+seqLen: 40
+shrinkLimit: 1000
+coverage: true
+corpusDir: null
+sender: ["0x10000", "0x20000", "0x30000"]
+psender: "0x10000"
+deployer: "0x30000"
+balanceAddr: 400000000000000000000
+balanceContract: 400000000000000000000
+maxValue: 100000000000000000000
+maxTimeDelay: 2592000
+maxBlockDelay: 60480
+codeSize: 0xffffffff
+allowFFI: false
+testDestruction: false
+cryticArgs: ["--solc", "build/audit/bin/solc", "--solc-force-legacy-json", ""]
