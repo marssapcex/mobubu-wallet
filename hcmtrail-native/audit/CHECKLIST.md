@@ -127,6 +127,8 @@ Hàm chưa phủ và lý do (đã kiểm, **không** phải bỏ sót):
 - [x] Mọi phát hiện F-1…F-8 có dòng trong mục 2 với trạng thái và bằng chứng
 - [x] `docs/AUDIT-SOLIDITY.md` phản ánh trạng thái sau sửa (mục 4 mới)
 - [x] Bộ reorg/replay (F-9 + bài học THORChain 31/10): 7 bài PASS
+- [x] Prover off-chain chạy trong **trình duyệt thật**: `test/prover-browser.test.mjs` (mặc định skip,
+      bật bằng `PROVER_BROWSER=1`) — proof sinh trong Chromium được verifier on-chain chấp nhận
 - [ ] Trước khi deploy thật: xác minh địa chỉ outbox (Arbitrum) / messenger (Base) khớp
       tài liệu chính thức — `Transport.check` chỉ kiểm tra "có code", không kiểm tra danh tính
 - [ ] Echidna/Medusa: vẫn chưa chạy được trong sandbox — cấu hình sẵn sàng, ghi ở §5 báo cáo
@@ -139,6 +141,7 @@ Hàm chưa phủ và lý do (đã kiểm, **không** phải bỏ sót):
 | Làn Arbitrum (31338) / Base (31339) | `NetworkScenariosTest` mô phỏng đúng *hình thức xác thực* của hai làn (outbox `l2ToL1Sender`, messenger `xDomainMessageSender`) bằng transport fixture; `EthNetworkState` 114/124 dòng | ✅ đã chạy (fixture) |
 | Testnet/mainnet thật (Sepolia, Arbitrum Sepolia) | `forge test --fork-url $RPC` + deploy thật; cần RPC và bridge thật | ⛔ chặn: sandbox chỉ mở github/npm/pypi, không có RPC |
 | Fork mainnet để kiểm finality của outbox | `forge test --fork-url $MAINNET_RPC --match-contract ReorgScenariosTest` | ⛔ cùng lý do; đây là việc cần làm trước khi deploy |
+| **Trình duyệt thật** (Chromium headless 131) — prover WASM chạy trong Web Worker | `PROVER_BROWSER=1 CHROMIUM_LIBS=<libnss dir> npm run test:prover:browser` (cần `npm i --no-save playwright-core @sparticuz/chromium`) | ✅ đã chạy: proof **95.656 byte / 343,8 s** trong Chromium, được verifier Solidity nhận, rút 998.200.810.000.000.017 wei, gas 8.238.300 |
 
 Điểm cần nhớ khi chạy trên chain thật: `Transport.check` chỉ kiểm tra "địa chỉ có code" và
 `inbox.bridge()`, **không** kiểm tra đó có đúng là outbox/messenger chính thức. Trên fork

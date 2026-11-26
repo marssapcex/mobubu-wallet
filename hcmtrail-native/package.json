@@ -25,7 +25,8 @@
     "test:staking": "node --test test/eth-fee-staking.test.mjs",
     "test:pool:key": "node --test test/eth-key-fresh.test.mjs",
     "test:routes": "node --test test/eth-clearing.test.mjs",
-    "test:routes:fresh": "node --test test/eth-clearing-fresh.test.mjs"
+    "test:routes:fresh": "node --test test/eth-clearing-fresh.test.mjs",
+    "test:prover:browser": "node --test test/prover-browser.test.mjs"
   },
   "devDependencies": {
     "@nomicfoundation/edr": "0.25.1",
