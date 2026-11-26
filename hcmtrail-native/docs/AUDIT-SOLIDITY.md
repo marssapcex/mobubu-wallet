@@ -274,6 +274,27 @@ không kiểm tra *danh tính* bridge; (2) cần thêm bước xác minh địa 
 chính thức trong quy trình triển khai; (3) nên theo dõi `outboundNative` theo tuổi đơn để
 phát hiện message mất.
 
+### 5.6 Đối chiếu với upstream (đã clone và đọc, không phải suy đoán)
+
+Clone `NON-OS/L1-Shield@9d17ad96` và `NON-OS/STARKs@a47d23ae` rồi so hash:
+
+| Hạng mục | Upstream | Repo này | Kết luận |
+| --- | --- | --- | --- |
+| `PoseidonGoldilocks.sol`, `StarkProofReader.sol` | `contracts/shield/` | `contracts/vendor/nonos/` | sha256 **trùng** (byte-identical) |
+| `chunk0..2.hex` | `spec/not-before/` | `contracts/vendor/nonos/` | sha256 **trùng** |
+| Image hash | `deployments/sepolia.env` → `PRODUCTION_IMAGE_HASH` | `NativeStark.STARK_IMAGE` | **cùng** `0x4364151e…2429` |
+| Public words | `spec/not-before/transfer-eth-shape1/publics.json` | `_consume` dựng 37 limb | **cùng layout** (root×2, nf×2, cm×2, amount, fee, asset, price, recipient×4, feeRecipient×4, not_before) |
+| Commitment | `_computeCommitmentWith`: `hash2(uint32(v)｜(v>>32)<<64｜asset<<128｜domain<<192, ownerCommit)` | `NativeNoteDeposits.commitment` | **cùng công thức** |
+| Prover | `nox_prover` (`api.rs`, `proof.rs`) | `prover.wasm` build từ cùng commit | cùng engine |
+
+Nghĩa là statement trong repo **không** phải "NotBefore yếu": `not_before` chỉ là **word thứ 37**
+của statement join-split 2-vào/2-ra (`stark_proofs/src/shield/join/`, gọi là
+`transfer-eth-shape1`, shape **A**). Phần khác upstream: `settleBatch` (11–13 word/intent,
+`clearingPrice`, `MAX_INTENTS = 64`, cửa sổ settler), `AmountPolicy` theo mệnh giá
+(1, 2, 5 × 10ⁿ), `associationRegistry`, vòng root 138 slot, `soundnessBitsForSize ≥ 80`.
+Đo gas của họ cho cùng shape: **2,15 M verify / 3,86 M cả tx** (`docs/12-gas.md`), trong khi
+pool này đo **8,24 M** — chênh ~2,1×, là việc tối ưu thật chứ không phải khác biệt proof.
+
 ## 6. Khoảng trống và rủi ro chưa kiểm
 
 1. **Echidna 2.4.0 chưa chạy.** Asset `echidna-2.4.0-x86_64-linux.tar.gz`
@@ -293,8 +314,10 @@ phát hiện message mất.
    Hoặc `docker run -v $PWD:/src ghcr.io/crytic/medusa:latest`.
 3. **Halmos không dựng được** trạng thái pool (constructor tạo hợp đồng lồng nhau).
    Các tính chất của pool chỉ được kiểm bằng fuzz + lập luận số học.
-4. **Verifier STARK** không được kiểm: mọi proof trong test là fixture băm `words`.
-   Không có kết luận về âm thanh (soundness) của giao thức.
+4. **Verifier STARK**: test Foundry dùng fixture `keccak(abi.encode(words))`, nhưng nhánh JS
+   (`npm run test:pool:key`, `npm run test:prover:browser`) deploy `EthShieldedPool` thật và
+   verify proof thật bằng evaluator ghim. Vẫn **không** có kết luận về soundness của toán học
+   STARK — chỉ có kết luận rằng đường ống (publics ↔ verifier ↔ pool) khớp nhau.
 5. **Cross-lane**: `EthNetworkState` đã có 7 kịch bản đầu-cuối với transport fixture
    (114/124 dòng), nhưng **chưa** fuzz nhiều chain thật và chưa kiểm bridge thật
    (Arbitrum/Base). `NativeStark` (0/35 dòng) và `EthPoolVerified._verifyNote` chỉ chạm
