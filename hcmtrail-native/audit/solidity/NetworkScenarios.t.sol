@@ -351,4 +351,56 @@ contract NetworkScenariosTest {
         }
         assert(reverted);
     }
+
+    /// A forged "paid" packet from an ordinary account must not release escrow: only
+    /// the transport-authenticated message (outbox/bridge) can move the stage.
+    function test_ForgedPaidPacketFromEoaCannotReleaseEscrow() public {
+        pool.fundLiquidity{value: 5 ether}();
+        pool.deposit{value: 11 ether}(bytes32(uint256(1_201)));
+        ExitOrder memory o = _lockOutbound(2 ether);
+        bytes32 id = pool.exitId(o);
+        uint256 outbound = pool.outboundNative();
+        assert(outbound == 2 ether);
+
+        bool reverted;
+        try pool.acceptPacket(id, o, EthNetworkState.Packet.Paid) {
+            reverted = false;
+        } catch {
+            reverted = true;
+        }
+        assert(reverted);
+        assert(pool.exitStage(id) == EthNetworkState.Stage.Locked);
+        assert(pool.outboundNative() == outbound);
+        _bookBalanced();
+
+        // The real bridge delivery still works afterwards.
+        _deliverArb(address(pool), abi.encodeCall(EthNetworkState.acceptPacket, (id, o, EthNetworkState.Packet.Paid)));
+        assert(pool.exitStage(id) == EthNetworkState.Stage.Settled);
+        _bookBalanced();
+    }
+
+    /// A packet that arrives through the wrong bridge (Base messenger instead of the
+    /// Arbitrum outbox) is rejected, and the order stays un-authorized.
+    function test_PacketThroughWrongBridgeIsRejected() public {
+        pool.fundLiquidity{value: 5 ether}();
+        ExitOrder memory o = _order(uint64(ARB_LANE), uint64(ETH_LANE), 1 ether, payable(address(0xf100)), bytes32(uint256(7)));
+        bytes32 id = pool.exitId(o);
+
+        bytes memory packet = abi.encodeCall(EthNetworkState.acceptPacket, (id, o, EthNetworkState.Packet.Open));
+        (bool ok,) = address(base).call(abi.encodeCall(LocalMessageTransport.deliver, (BASE_PEER, address(pool), packet)));
+        assert(!ok);
+
+        bool reverted;
+        try pool.claimAcross(o) {
+            reverted = false;
+        } catch {
+            reverted = true;
+        }
+        assert(reverted);
+
+        // The correct bridge authorizes it.
+        _deliverArb(address(pool), packet);
+        pool.claimAcross(o);
+        assert(address(uint160(0xf100)).balance == 1 ether - 1 ether * 9 / 10_000);
+    }
 }

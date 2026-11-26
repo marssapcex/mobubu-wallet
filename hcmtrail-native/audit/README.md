@@ -53,7 +53,7 @@ FOUNDRY_INVARIANT_RUNS=1024 FOUNDRY_INVARIANT_DEPTH=96 \
 FOUNDRY_PROFILE=stateful ./build/audit/bin/forge test --offline \
   --use "$PWD/build/audit/bin/solc" --match-contract '^StatefulInvariantTest$' --summary
 
-# 3b. Toàn bộ campaign audit (27 test, gồm 13 kịch bản "deep" + 7 kịch bản cross-lane)
+# 3b. Toàn bộ campaign audit (34 test: 13 deep + 9 cross-lane + 5 reorg/replay + 7 cũ)
 ./build/audit/bin/forge test --offline --use "$PWD/build/audit/bin/solc" --threads 1 \
   --no-match-contract '^StatefulInvariantTest$' --summary
 
@@ -90,6 +90,9 @@ echidna build/audit/medusa-target/StatefulProperties.sol --config audit/echidna.
 - `solidity/NetworkScenarios.t.sol` — 7 kịch bản cross-lane trên transport thật
   (`LocalMessageTransport` + bridge/outbox): khoá → Settled, khoá → Cancelled → hoàn,
   Open → chi, huỷ theo secret, thiếu thanh khoản, retry, làn sai.
+- `solidity/ReorgScenarios.t.sol` — 5 kịch bản reorg/replay kiểu sự cố THORChain 31/10:
+  không có đường ghi có ngoài deposit, root nhánh bị bỏ, replay proof/retarget người nhận,
+  tx kẹt mempool 1 năm, cùng nullifier cho hai vé.
 - `CHECKLIST.md` — map **phát hiện → bản sửa → bài test → bảng phủ → điều kiện merge**;
   đây là thứ phải cập nhật khi thêm/bớt phát hiện.
 - `medusa.json`, `echidna.yaml` — cấu hình chiến dịch.

@@ -17,7 +17,7 @@ Ngày: 2026-11-18 · Nhánh `arena/32000e7e-mobubu-wallet` · Phạm vi: **chỉ
 - **Không** có kết luận nào về tính đúng của STARK: verifier trong các test này là
   fixture (`keccak256(abi.encode(words))`). Không có phê duyệt lưu ký công khai.
 - **F-1 đã được sửa trong bản này** (`EthPoolState._openOrJoin`) và chứng minh bằng
-  test đỏ-trước-xanh-sau; F-6 đã sửa comment. Sau khi sửa, toàn bộ 27 test audit PASS,
+  test đỏ-trước-xanh-sau; F-6 đã sửa comment. Sau khi sửa, toàn bộ 34 test audit PASS,
   7 kịch bản cross-lane mới PASS, chiến dịch stateful chạy lại trên **chính bản đã sửa**
   (393.216 lời gọi) PASS, và `npm test` 22/22 PASS. Pool runtime tăng 34 B
   (24.103 → **24.137 B**, trần EIP-170 24.576 B, còn **439 B**).
@@ -65,6 +65,8 @@ Ngày: 2026-11-18 · Nhánh `arena/32000e7e-mobubu-wallet` · Phạm vi: **chỉ
 | 10 | Forge test | `NetworkScenarios.t.sol` — 7 kịch bản cross-lane (transport fixture thật: outbox/bridge + messenger) | khoá → Settled, khoá → Cancelled → hoàn, Open → chi, huỷ theo secret, thiếu thanh khoản, retry, làn sai | — | PASS (7/7) | 0,13 s |
 | 11 | Forge invariant | `StatefulInvariantTest` **trên bản đã sửa** (`FOUNDRY_PROFILE=stateful`) | 6 bất biến × 512 chuỗi × 128 bước | **393.216** | PASS | 536,63 s |
 | 12 | Forge coverage | `contracts/ethereum` + `contracts/vault` | lcov | — | **75/83 hàm, 513/586 dòng (87,5%)** | 13,4 s |
+| 13 | Forge test | `ReorgScenarios.t.sol` — 5 kịch bản reorg/replay kiểu THORChain 31/10 | không có đường ghi có ngoài deposit + proof của chính pool; root ngoài nhánh bị từ chối; replay proof/retarget người nhận; proof nằm mempool 1 năm; cùng nullifier cho 2 vé | — | PASS (5/5) | 0,15 s |
+| 14 | Forge test | `NetworkScenarios.t.sol` +2 kịch bản gói tin giả | EOA tự gửi `Paid`; gói qua sai bridge | — | PASS (9/9 tổng) | 0,16 s |
 
 Cách đếm: cột "lời gọi mô hình hoá" là số lời gọi *bên trong* mỗi ca fuzz
 (fuzz case × bước × lời gọi mỗi bước). Đây **không** phải số giao dịch độc lập, không
@@ -153,6 +155,19 @@ Mỗi root mới tốn một slot vĩnh viễn. Không phải lỗi bảo mật 
 hợp đồng cần nhiều gas hơn sẽ làm **toàn bộ** lô revert. Không mất tiền, nhưng một địa
 chỉ "khó tính" chặn được lô (người nhận do chính người nạp chọn, nên rủi ro tự gây).
 
+### F-9 (Thông tin) — proof không có hạn dùng; root không hết hạn
+
+`_consume` chỉ ràng buộc `notBefore` (là *sàn* thời gian, theo lưới 600 s), **không** có
+`notAfter`, và `knownRoot` không bao giờ bị xoá (F-7). Vì vậy một giao dịch đã ký có thể
+nằm mempool rất lâu — kể cả qua một reorg — rồi vẫn được include và vẫn hợp lệ. Đây
+đúng là lớp sự cố đã dừng THORChain tháng 10/2026 (giao dịch bị reorg, quan sát viên vẫn
+trả tiền), nhưng ở đây hậu quả bị chặn bởi ba thứ: nullifier chỉ dùng một lần
+(`AlreadySpent`), commitment gắn cứng người nhận/số tiền (đổi người nhận là proof sai),
+và tag batch tách đặt chỗ khỏi chi trực tiếp. Không nhân đôi chi tiêu; rủi ro còn lại chỉ
+là *ý định cũ được thi hành muộn*. Khuyến nghị: ví nên ký lại bằng nullifier mới nếu tx
+chưa vào chain sau N block; nếu muốn chặn hẳn, thêm `notAfter` vào `PoolSpend` (thay đổi
+ABI, cần một epoch chuyển tiếp).
+
 ### Kết quả âm tính đã kiểm chứng (tốt cho hệ)
 
 - **Không** hoàn tiền được cho lô đã chi: `refundPart` với vé đã trả revert
@@ -222,7 +237,7 @@ Nhờ đó `EthNetworkState` từ **0/124 dòng** lên **114/124** và `RollupMe
 
 ### 5.4 Tổng sau khi sửa
 
-- 27 test audit PASS (13 + 7 kịch bản mới, 7 test cũ).
+- 34 test audit PASS (13 deep + 9 cross-lane + 5 reorg/replay + 7 test cũ).
 - Tổng lời gọi mô hình hoá **5.242.880** = 3.145.728 (token fuzz) + 98.304 (staking
   invariant) + 32.768 (vault fuzz) + 1.572.864 (stateful trước sửa) + **393.216**
   (stateful trên bản đã sửa). Con số cuối là con số quan trọng: nó chạy trên đúng mã
@@ -230,6 +245,34 @@ Nhờ đó `EthNetworkState` từ **0/124 dòng** lên **114/124** và `RollupMe
 - Phủ: **75/83 hàm, 513/586 dòng (87,5%)**; danh sách hàm chưa phủ kèm lý do ở
   `audit/CHECKLIST.md` §5.
 - `npm test`: **22/22 PASS** trên bản đã sửa (pool, keeper, relayer, bridge, vault).
+
+### 5.5 Reorg và replay — đối chiếu sự cố THORChain 31/10/2026
+
+Sự cố tham chiếu: một block Ethereum bị reorg làm khoản nạp 10 ETH biến mất; bộ kiểm tra
+solvency dừng swap, node operator dừng ký, rồi dừng cả các chain khác; điểm nguy hiểm được
+nêu là "khi chain ngoài reorg, kẻ tấn công có thể gửi giao dịch mới cùng nonce và vẫn được
+vault trả tiền". Đối chiếu với thiết kế ở đây:
+
+| Khía cạnh | Thiết kế HCMTrail | Bài test |
+| --- | --- | --- |
+| Khoản nạp bị reorg | Không có đường ghi có nào ngoài `deposit`/`depositBatch` mở rộng chính cây của pool; không có admin/oracle nhận "sự kiện đã quan sát" | `test_NoCreditPathOutsideDepositAndOwnProof` |
+| Root của nhánh bị bỏ | `_consume` đòi `knownRoot[s.root]`; root lạ ⇒ `UnknownRoot` | `test_RootFromAnotherBranchIsRejected` |
+| "Gửi lại cùng nonce" | Pool không dùng nonce của EOA: quyền chi là **nullifier + commitment**. Gửi lại proof cũ ⇒ `AlreadySpent`; đổi người nhận ⇒ proof sai | `test_ReplayedProofPaysOnceAndCannotBeRetargeted` |
+| Tx kẹt mempool qua reorg | Vẫn hợp lệ (không `notAfter`, root không hết hạn) nhưng **một lần** — xem F-9 | `test_PendingProofStaysValidButSingleUse` |
+| Cùng nullifier cho vé khác | `spent[]` chặn trước khi verify ⇒ không đếm tiền hai lần | `test_SameNullifierCannotFundTwoTickets` |
+| Gói tin giả báo "đã trả" | `acceptPacket` chỉ nhận qua `authenticate` của transport (outbox `l2ToL1Sender` cho Arbitrum, messenger cho Base) | `test_ForgedPaidPacketFromEoaCannotReleaseEscrow` |
+| Gói tin qua sai bridge | Sai `msg.sender` ⇒ revert; trạng thái giữ nguyên | `test_PacketThroughWrongBridgeIsRejected` |
+| Message bị reorg mất (chiều ra) | Đơn ở `Locked`; `retryAcross` gửi lại cùng `id`, đích xử lý idempotent theo `id` | `test_RetryAllowedAndForwardRejectedForDirectRoute` |
+
+**Giả định còn lại (không kiểm được trong sandbox):** tính *finality* của cầu. Trên
+Arbitrum/Base thật, message chỉ thi hành được sau cửa sổ thử thách, nên "Paid" mà làn
+nguồn nhận được là message đã final; nhưng hợp đồng **không** tự kiểm tra finality — nó tin
+vào `outbox`/`messenger`. Nếu triển khai trên một rollup có fast-confirm chưa đủ an toàn,
+hoặc nếu `MessageConfig` bị cấu hình sai (trỏ vào một contract không phải outbox thật), thì
+lớp bảo vệ này mất. Vì vậy: (1) `Transport.check` chỉ kiểm tra *có code* + `inbox.bridge()`,
+không kiểm tra *danh tính* bridge; (2) cần thêm bước xác minh địa chỉ outbox/messenger
+chính thức trong quy trình triển khai; (3) nên theo dõi `outboundNative` theo tuổi đơn để
+phát hiện message mất.
 
 ## 6. Khoảng trống và rủi ro chưa kiểm
 

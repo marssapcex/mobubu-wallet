@@ -23,7 +23,7 @@ FOUNDRY_PROFILE=stateful ./build/audit/bin/forge test --offline \
 npm test && npm run build:pool:legacy
 ```
 
-Kỳ vọng: (a) `27 passed; 0 failed`; (b) `6 invariants passed`; (c) `22 pass` và
+Kỳ vọng: (a) `34 passed; 0 failed`; (b) `6 invariants passed`; (c) `22 pass` và
 `pool runtime 24137 B` (trần EIP-170 là 24.576 B → còn **439 B**).
 
 ## 2. Phát hiện → bản sửa → bằng chứng
@@ -38,6 +38,7 @@ Kỳ vọng: (a) `27 passed; 0 failed`; (b) `6 invariants passed`; (c) `22 pass`
 | F-6 | Thông tin | Comment biên tràn của `EthFeeStaking` lạc quan (nói tới 2^256) | **ĐÃ SỬA** (comment nói đúng trần `fundedWei` 2^128 ⇒ check revert) | `StakingInvariantTest` + fuzz `depositFees` |
 | F-7 | Thông tin | `knownRoot` không bao giờ bị xoá | Chấp nhận: root không hết hạn theo thiết kế; cần theo dõi off-chain | `StatefulInvariantTest.invariant_treeStaysBounded` |
 | F-8 | Thông tin | Chi lô all-or-nothing, ~35k gas/người nhận; một người nhận chặn cả lô | Chấp nhận (người nạp tự chọn người nhận), đã ghi | `test_RejectingRecipientRevertsWholeBatchThenRefunds` — cả lô revert, không chi đồng nào, sau hết hạn hoàn đủ 5 phần |
+| F-9 | Thông tin | Proof không có `notAfter`, root không hết hạn ⇒ tx kẹt mempool/reorg vẫn hợp lệ vô hạn (vẫn một lần dùng) | Chấp nhận; khuyến nghị ví ký lại sau N block, hoặc thêm `notAfter` ở epoch sau | `ReorgScenariosTest.test_PendingProofStaysValidButSingleUse` |
 
 Quy tắc: một phát hiện **chỉ được đánh “ĐÃ SỬA” khi có bài test đỏ-trước-xanh-sau**.
 F-1 ở trên đã được kiểm đúng cách đó (xem mục 4).
@@ -66,6 +67,13 @@ Liệt kê theo *điều kiện đồng thời* — đây là phần fuzz ngẫu
 | huỷ sai secret + huỷ đúng + chặn chi | `test_InboundCancelNeedsTheSecretAndBlocksPayment` | PASS |
 | thanh khoản thiếu + nạp thêm + chi đúng | `test_ShortLiquidityBlocksThenAllowsClaim` | PASS |
 | retry + forward sai tuyến + làn sai | `test_RetryAllowedAndForwardRejectedForDirectRoute`, `test_WrongLaneAndBadOrdersAreRejected` | PASS |
+| **reorg: root nhánh bị bỏ + proof đúng** | `ReorgScenariosTest.test_RootFromAnotherBranchIsRejected` | PASS |
+| **reorg: replay proof + đổi người nhận** | `test_ReplayedProofPaysOnceAndCannotBeRetargeted` | PASS |
+| **reorg: tx kẹt mempool 1 năm** | `test_PendingProofStaysValidButSingleUse` | PASS |
+| **reorg: cùng nullifier cho vé thứ hai** | `test_SameNullifierCannotFundTwoTickets` | PASS |
+| **không có đường ghi có ngoài deposit** | `test_NoCreditPathOutsideDepositAndOwnProof` | PASS |
+| **gói `Paid` giả từ EOA** | `NetworkScenariosTest.test_ForgedPaidPacketFromEoaCannotReleaseEscrow` | PASS |
+| **gói tin qua sai bridge** | `test_PacketThroughWrongBridgeIsRejected` | PASS |
 
 ## 4. Bằng chứng “đỏ trước, xanh sau” cho F-1
 
@@ -111,11 +119,27 @@ Hàm chưa phủ và lý do (đã kiểm, **không** phải bỏ sót):
 
 - [x] F-1 sửa trong `EthPoolState._openOrJoin`, có test đỏ-trước-xanh-sau
 - [x] F-6 comment đã viết lại đúng ngữ nghĩa `fundedWei` (2^128)
-- [x] Bộ audit Solidity: 27 test PASS (fuzz 3.145.728 + stateful 1.572.864 lời gọi cũ + chiến dịch mới)
+- [x] Bộ audit Solidity: 34 test PASS (fuzz 3.145.728 + stateful 1.572.864 lời gọi cũ + chiến dịch mới)
 - [x] Chiến dịch stateful chạy lại trên **bản đã sửa** với `FOUNDRY_PROFILE=stateful`
 - [x] `npm test` 22/22 PASS trên bản đã sửa
 - [x] Kích thước: pool runtime 24.137 B / trần 24.576 B (còn 439 B) — đã ghi lại, không vượt
 - [x] Không đổi ABI công khai, không đổi storage layout (chỉ thêm biến `full` cục bộ)
 - [x] Mọi phát hiện F-1…F-8 có dòng trong mục 2 với trạng thái và bằng chứng
 - [x] `docs/AUDIT-SOLIDITY.md` phản ánh trạng thái sau sửa (mục 4 mới)
+- [x] Bộ reorg/replay (F-9 + bài học THORChain 31/10): 7 bài PASS
+- [ ] Trước khi deploy thật: xác minh địa chỉ outbox (Arbitrum) / messenger (Base) khớp
+      tài liệu chính thức — `Transport.check` chỉ kiểm tra "có code", không kiểm tra danh tính
 - [ ] Echidna/Medusa: vẫn chưa chạy được trong sandbox — cấu hình sẵn sàng, ghi ở §5 báo cáo
+
+## 7. Chạy trên chain nào
+
+| Phạm vi | Cách chạy | Trạng thái |
+| --- | --- | --- |
+| Lab EVM (chain ID **31337**, làn Ethereum của pool) | toàn bộ mục 1 — đây là nơi 34 test ở trên chạy | ✅ đã chạy |
+| Làn Arbitrum (31338) / Base (31339) | `NetworkScenariosTest` mô phỏng đúng *hình thức xác thực* của hai làn (outbox `l2ToL1Sender`, messenger `xDomainMessageSender`) bằng transport fixture; `EthNetworkState` 114/124 dòng | ✅ đã chạy (fixture) |
+| Testnet/mainnet thật (Sepolia, Arbitrum Sepolia) | `forge test --fork-url $RPC` + deploy thật; cần RPC và bridge thật | ⛔ chặn: sandbox chỉ mở github/npm/pypi, không có RPC |
+| Fork mainnet để kiểm finality của outbox | `forge test --fork-url $MAINNET_RPC --match-contract ReorgScenariosTest` | ⛔ cùng lý do; đây là việc cần làm trước khi deploy |
+
+Điểm cần nhớ khi chạy trên chain thật: `Transport.check` chỉ kiểm tra "địa chỉ có code" và
+`inbox.bridge()`, **không** kiểm tra đó có đúng là outbox/messenger chính thức. Trên fork
+thật phải thêm bài so khớp địa chỉ với tài liệu của Arbitrum/Base.
