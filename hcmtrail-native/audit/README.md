@@ -53,7 +53,7 @@ FOUNDRY_INVARIANT_RUNS=1024 FOUNDRY_INVARIANT_DEPTH=96 \
 FOUNDRY_PROFILE=stateful ./build/audit/bin/forge test --offline \
   --use "$PWD/build/audit/bin/solc" --match-contract '^StatefulInvariantTest$' --summary
 
-# 3b. Toàn bộ campaign audit (26 test, gồm 12 kịch bản "deep" + 7 kịch bản cross-lane)
+# 3b. Toàn bộ campaign audit (27 test, gồm 13 kịch bản "deep" + 7 kịch bản cross-lane)
 ./build/audit/bin/forge test --offline --use "$PWD/build/audit/bin/solc" --threads 1 \
   --no-match-contract '^StatefulInvariantTest$' --summary
 
@@ -84,7 +84,7 @@ echidna build/audit/medusa-target/StatefulProperties.sol --config audit/echidna.
 - `solidity/StatefulProperties.sol` — mục tiêu Medusa/Echidna dùng chung.
 - `solidity/StatefulInvariant.t.sol` — chạy chính mục tiêu đó bằng Forge + smoke test.
 - `solidity/PoolSymbolic.t.sol` — test Halmos cho quy tắc phí (bị chặn ở `setUp`).
-- `solidity/DeepScenarios.t.sol` — 12 kịch bản nhiều điều kiện đồng thời (lô đầy, round
+- `solidity/DeepScenarios.t.sol` — 13 kịch bản nhiều điều kiện đồng thời (lô đầy, round
   cũ hết hạn, người nhận từ chối, cap rebate, biên kỳ, bỏ kỳ, vé 1 wei, phí biên, nạp
   nhiều note, rút trực tiếp). Đây là lớp chống hồi quy cho F-1 và các luật kế toán.
 - `solidity/NetworkScenarios.t.sol` — 7 kịch bản cross-lane trên transport thật

@@ -23,7 +23,7 @@ FOUNDRY_PROFILE=stateful ./build/audit/bin/forge test --offline \
 npm test && npm run build:pool:legacy
 ```
 
-Kỳ vọng: (a) `26 passed; 0 failed`; (b) `6 invariants passed`; (c) `22 pass` và
+Kỳ vọng: (a) `27 passed; 0 failed`; (b) `6 invariants passed`; (c) `22 pass` và
 `pool runtime 24137 B` (trần EIP-170 là 24.576 B → còn **439 B**).
 
 ## 2. Phát hiện → bản sửa → bằng chứng
@@ -55,6 +55,7 @@ Liệt kê theo *điều kiện đồng thời* — đây là phần fuzz ngẫu
 | stake 100 + qua biên kỳ + requestUnstake + claim | `test_RelayEligibilityDropsExactlyAtBoundaryAndKeepsEarnedCredit` | PASS |
 | bỏ qua nhiều kỳ + pot có phí nạp + chia dư | `test_SkippedEpochsDoNotOverclaim` | PASS |
 | vé 1 wei + tách phần + hoàn đúng + chống dùng lại proof | `test_OneWeiPartIsSingleUseAndRefundsExactlyOneWei` | PASS |
+| **hai lô cùng đầy, cùng giữ tiền, rồi chi lần lượt** (trạng thái F-1 từng chặn) | `test_TwoFullRoundsSettleIndependently` | PASS |
 | chia lô thành nhiều phần lẻ wei | `test_TinyBatchSplitsEveryWeiExactly` | PASS |
 | phí 9 bps trên biên (1, 111, 1.111, 1.112, 2^64-1) | `test_FeeIsExactlyNineBpsForEveryTicket` | PASS |
 | nạp nhiều note + tổng khớp từng wei + từ chối lệch | `test_DepositBatchSplitsEveryUnitOfNet` | PASS |
@@ -85,11 +86,11 @@ cp /tmp/EthPoolState.fixed.sol contracts/ethereum/EthPoolState.sol
 
 ## 5. Bảng phủ (Forge coverage, chỉ `contracts/ethereum` + `contracts/vault`)
 
-`forge coverage --report lcov` → **75/83 hàm, 512/586 dòng (87,4%)**.
+`forge coverage --report lcov` → **75/83 hàm, 513/586 dòng (87,5%)**.
 
 | File | Hàm phủ | Dòng phủ |
 | --- | --- | --- |
-| `contracts/ethereum/EthPoolState.sol` | 20/22 | 145/154 |
+| `contracts/ethereum/EthPoolState.sol` | 20/22 | 146/154 |
 | `contracts/ethereum/EthNetworkState.sol` | 19/19 | 114/124 |
 | `contracts/ethereum/EthFeeStaking.sol` | 22/23 | 136/138 |
 | `contracts/ethereum/RollupMessageTransport.sol` | 3/3 | 16/31 |
@@ -110,7 +111,7 @@ Hàm chưa phủ và lý do (đã kiểm, **không** phải bỏ sót):
 
 - [x] F-1 sửa trong `EthPoolState._openOrJoin`, có test đỏ-trước-xanh-sau
 - [x] F-6 comment đã viết lại đúng ngữ nghĩa `fundedWei` (2^128)
-- [x] Bộ audit Solidity: 26 test PASS (fuzz 3.145.728 + stateful 1.572.864 lời gọi cũ + chiến dịch mới)
+- [x] Bộ audit Solidity: 27 test PASS (fuzz 3.145.728 + stateful 1.572.864 lời gọi cũ + chiến dịch mới)
 - [x] Chiến dịch stateful chạy lại trên **bản đã sửa** với `FOUNDRY_PROFILE=stateful`
 - [x] `npm test` 22/22 PASS trên bản đã sửa
 - [x] Kích thước: pool runtime 24.137 B / trần 24.576 B (còn 439 B) — đã ghi lại, không vượt

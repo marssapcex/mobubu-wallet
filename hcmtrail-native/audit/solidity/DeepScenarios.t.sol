@@ -406,4 +406,64 @@ contract DeepScenariosTest {
         assert(pool.ticketId(a) != pool.ticketId(b));
         assert(pool.ticketId(a) == keccak256(abi.encode(pool.domain(), a)));
     }
+
+    /// Two escrowed rounds can be outstanding at once (the state F-1 used to make
+    /// unreachable). They must settle independently, keep the refund book exact and
+    /// never let a settled round be joined or refunded again.
+    function test_TwoFullRoundsSettleIndependently() public {
+        pool.deposit{value: 11 ether}(bytes32(uint256(1_011)));
+        uint256 amount = 0.2 ether;
+        uint64 part = uint64(amount);
+        uint256 shielded = pool.shieldedNative();
+
+        for (uint256 i; i < 5; ++i) _reserve(amount, 1, 5, part, payable(address(uint160(0x2000 + i))));
+        for (uint256 i; i < 5; ++i) _reserve(amount, 2, 5, part, payable(address(uint160(0x2100 + i))));
+        assert(pool.latestRound(amount) == 2);
+        uint256 perBatch = 5 * amount;
+        assert(pool.reservedNative() == 2 * perBatch);
+        assert(pool.reservedRefundLeaves() == 10);
+        _bookBalanced();
+
+        (uint256 fee,) = pool.quoteFee(part);
+        uint256 fundedBefore = staking.fundedWei();
+
+        assert(_tryExecute(amount, 1));
+        (,, uint8 c1, bool paid1) = pool.getBatch(amount, 1);
+        assert(paid1 && c1 == 5);
+        assert(pool.reservedNative() == perBatch);
+        assert(pool.reservedRefundLeaves() == 5);
+
+        assert(_tryExecute(amount, 2));
+        (,, uint8 c2, bool paid2) = pool.getBatch(amount, 2);
+        assert(paid2 && c2 == 5);
+        assert(pool.reservedNative() == 0);
+        assert(pool.reservedRefundLeaves() == 0);
+        // The pool books gross out of escrow; the fee legs land in staking.
+        assert(pool.shieldedNative() == shielded - 2 * perBatch);
+        assert(staking.fundedWei() == fundedBefore + 2 * 5 * fee);
+        _bookBalanced();
+
+        // Every recipient of both rounds was paid exactly net.
+        assert(address(uint160(0x2000)).balance == amount - fee);
+        assert(address(uint160(0x2104)).balance == amount - fee);
+
+        // A settled round is closed: its tickets cannot be refunded...
+        bool reverted;
+        try pool.refundPart(_terms(amount, 1, 5, payable(address(uint160(0x2000))), 1), bytes32(uint256(201))) {
+            reverted = false;
+        } catch {
+            reverted = true;
+        }
+        assert(reverted);
+        // ...and a stale round number cannot open or join anything.
+        reverted = false;
+        try pool.reserve(hex"00", _spend(uint256(9_999)), _terms(amount, 2, 5, payable(address(0x2f00)), 9_999), part,
+            bytes32(uint256(9_999))) {
+            reverted = false;
+        } catch {
+            reverted = true;
+        }
+        assert(reverted);
+        assert(pool.latestRound(amount) == 2);
+    }
 }
