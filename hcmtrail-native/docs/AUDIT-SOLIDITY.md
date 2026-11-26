@@ -16,6 +16,13 @@ Ngày: 2026-11-18 · Nhánh `arena/32000e7e-mobubu-wallet` · Phạm vi: **chỉ
   đã sẵn sàng để chạy ở máy có mạng.
 - **Không** có kết luận nào về tính đúng của STARK: verifier trong các test này là
   fixture (`keccak256(abi.encode(words))`). Không có phê duyệt lưu ký công khai.
+- **F-1 đã được sửa trong bản này** (`EthPoolState._openOrJoin`) và chứng minh bằng
+  test đỏ-trước-xanh-sau; F-6 đã sửa comment. Sau khi sửa, toàn bộ 26 test audit PASS,
+  7 kịch bản cross-lane mới PASS, chiến dịch stateful chạy lại trên **chính bản đã sửa**
+  (393.216 lời gọi) PASS, và `npm test` 22/22 PASS. Pool runtime tăng 34 B
+  (24.103 → **24.137 B**, trần EIP-170 24.576 B, còn **439 B**).
+- Checklist chống bỏ sót: **`audit/CHECKLIST.md`** (phát hiện → bản sửa → bài test →
+  bảng phủ → điều kiện merge).
 
 ## 2. Phạm vi
 
@@ -54,6 +61,10 @@ Ngày: 2026-11-18 · Nhánh `arena/32000e7e-mobubu-wallet` · Phạm vi: **chỉ
 | 6 | Halmos | `HcmtSymbolicTest` (3 tính chất) | z3, mọi `uint96` | **15 đường** (6 + 6 + 3) | PASS | 0,35 s |
 | 7 | Halmos | `PoolSymbolicTest` (quy tắc phí) | z3 | — | **chặn**: `setUp()` không có đường thành công | — |
 | 8 | Forge test | `RefundFindingTest` (2 kịch bản thử phá hoàn tiền) | lô đã chi + lô hết hạn | — | **âm tính**: cả hai đều bị chặn | 0,16 s |
+| 9 | Forge test | `DeepScenarios.t.sol` — 12 kịch bản nhiều điều kiện đồng thời (bản đã sửa) | lô đầy, round cũ hết hạn, người nhận từ chối, cap rebate, biên kỳ, bỏ kỳ, vé 1 wei, phí biên, nạp nhiều note, rút trực tiếp | — | PASS (12/12) | 0,93 s |
+| 10 | Forge test | `NetworkScenarios.t.sol` — 7 kịch bản cross-lane (transport fixture thật: outbox/bridge + messenger) | khoá → Settled, khoá → Cancelled → hoàn, Open → chi, huỷ theo secret, thiếu thanh khoản, retry, làn sai | — | PASS (7/7) | 0,13 s |
+| 11 | Forge invariant | `StatefulInvariantTest` **trên bản đã sửa** (`FOUNDRY_PROFILE=stateful`) | 6 bất biến × 512 chuỗi × 128 bước | **393.216** | PASS | 536,63 s |
+| 12 | Forge coverage | `contracts/ethereum` + `contracts/vault` | lcov | — | **75/83 hàm, 512/586 dòng (87,4%)** | 13,4 s |
 
 Cách đếm: cột "lời gọi mô hình hoá" là số lời gọi *bên trong* mỗi ca fuzz
 (fuzz case × bước × lời gọi mỗi bước). Đây **không** phải số giao dịch độc lập, không
@@ -70,7 +81,7 @@ phải số giao dịch thực trên chain. Halmos đếm **đường tượng t
 
 ## 4. Phát hiện
 
-### F-1 (Trung bình, liveness) — làn rút bị khoá tới 24 giờ sau khi lô đầy
+### F-1 (Trung bình, liveness) — làn rút bị khoá tới 24 giờ sau khi lô đầy — **ĐÃ SỬA**
 
 `EthPoolState._openOrJoin` chỉ mở lô mới khi lô trước **không còn "live"**. Một lô đã
 đủ `target` vé nhưng chưa được chi vẫn "live" (`!paid && now < expiresAt`), nên mọi
@@ -83,6 +94,18 @@ Hệ quả: một người nạp hợp lệ có thể giữ làn `amount` đó �
 khác không mở được lô cùng mệnh giá. Không mất tiền, nhưng là DoS tạm thời và làm chậm
 trải nghiệm rút. Khuyến nghị: cho phép mở lô `round+1` khi lô trước đã đầy (kể cả chưa
 chi), hoặc thêm keeper chi tự động trong tài liệu vận hành.
+
+**Bản sửa (đang có trong `contracts/ethereum/EthPoolState.sol`):** một hàng đợi đã đủ
+`target` không thể nhận thêm đặt chỗ, nên nó không còn được coi là mở:
+
+```solidity
+bool full = previous.target != 0 && previous.entries.length == previous.target;
+bool live = !previous.paid && !full && block.timestamp < previous.expiresAt;
+```
+
+Lô đầy giờ đóng ngay khi đủ vé; lô `round+1` mở được, còn lô cũ vẫn `executeBatch`/
+`refundPart` bình thường vì `paid`/`expiresAt` không đổi. Chi phí: **+34 byte** runtime,
++2 phép so sánh trong đường `reserve`. Bằng chứng đỏ-trước-xanh-sau ở mục 5.2.
 
 ### F-2 (Thấp) — đặt chỗ 1 wei chỉ ràng buộc 223 bit
 
@@ -112,7 +135,7 @@ ghi trong tài liệu người dùng.
 Trên chain khác, `quoteRelayReward` trả 0 → mô hình 0,003 ETH/vé không áp dụng. Đúng
 chủ đích lab-only, nhưng nghĩa là mọi phân tích kinh tế relayer chỉ đúng trong lab.
 
-### F-6 (Thông tin) — comment về biên tràn của `EthFeeStaking` lạc quan
+### F-6 (Thông tin) — comment về biên tràn của `EthFeeStaking` lạc quan — **ĐÃ SỬA COMMENT**
 
 `_fundFees` giới hạn `fundedWei ≤ 2^128 − 1`, nên `index` (đơn vị `2^128`) có thể tới
 xấp xỉ `2^256` khi chỉ có **1 wei HCMT** stake và phí chạm trần. Không khả thi về kinh tế
@@ -147,7 +170,67 @@ chỉ "khó tính" chặn được lô (người nhận do chính người nạp
 - Halmos: với **mọi** `uint96`, `transferFrom` round-trip, self-transfer và allowance
   hữu hạn đều đúng (15 đường, 0 phản ví dụ).
 
-## 5. Khoảng trống và rủi ro chưa kiểm
+## 5. Bản sửa và chiến dịch tái kiểm
+
+### 5.1 Đã sửa gì
+
+| File | Thay đổi | Ảnh hưởng |
+| --- | --- | --- |
+| `contracts/ethereum/EthPoolState.sol` | `_openOrJoin`: thêm `full`, loại lô đầy khỏi `live`; bỏ guard `entries.length == target` bên trong | sửa F-1; +34 B runtime; ABI và storage layout **không đổi** |
+| `contracts/ethereum/EthFeeStaking.sol` | viết lại comment `_fundFees` cho đúng ngữ nghĩa `fundedWei ≤ 2^128` | sửa F-6; không đổi bytecode logic |
+
+Kích thước sau sửa (`npm run build:pool:legacy`): pool initcode+args **40.501 B**
+(trước 40.467), pool runtime **24.137 B** (trước 24.103, trần 24.576 → còn **439 B**),
+staking runtime **8.843 B** (không đổi).
+
+### 5.2 Chứng minh F-1 đã hết (đỏ trước, xanh sau)
+
+Cùng một bài test `DeepScenariosTest.test_FullQueueOpensNextRoundAndKeepsPriorSettleable`,
+chạy hai lần với hai luật:
+
+| Luật trong `_openOrJoin` | Kết quả |
+| --- | --- |
+| luật cũ (`live = !paid && now < expiresAt`) | `[FAIL: InvalidBatch()]` — đúng là lỗi F-1 |
+| luật mới (thêm `&& !full`) | `[PASS]` |
+
+Bài test không chỉ khẳng định “mở được lô 2”: nó còn kiểm lô 1 vẫn chi được sau khi lô 2
+đang mở (`latestRound == 2`, `getBatch(amount, 2).count == 1`, 5 người nhận mỗi người
+`0,49955 ETH`, `reservedNative == TICKET/4`, `reservedRefundLeaves == 1`), rồi hoàn phần
+của lô 2 sau hết hạn và kiểm sổ cân.
+
+### 5.3 Chiến dịch mới: điều kiện đồng thời, không phải fuzz đều
+
+Fuzz ngẫu nhiên hiếm khi chạm tới trạng thái cần *nhiều* điều kiện cùng đúng. Hai file
+mới dựng thẳng các giao nhau đó:
+
+- `audit/solidity/DeepScenarios.t.sol` (12 kịch bản): lô đầy + chưa chi + còn hạn + có
+  người nạp mới; lô cũ hết hạn + round nhảy; người nhận `RejectEth` + lô đủ + refund;
+  nhiều vé + cap rebate mỗi lô + hai lô liên tiếp; stake 100 + qua biên kỳ + unstake +
+  claim; bỏ qua 90 kỳ + pot có phí nạp; vé 1 wei + tách + hoàn + chống dùng lại proof;
+  chia lô thành phần lẻ wei; phí 9 bps trên biên; nạp nhiều note khớp từng wei; rút
+  trực tiếp + rebate.
+- `audit/solidity/NetworkScenarios.t.sol` (7 kịch bản): dựng transport thật
+  (`LocalMessageTransport` + `LocalArbMessageBridge`/`Outbox`), gửi gói đúng *hình thức
+  xác thực* của production (outbox/`l2ToL1Sender` cho làn Arbitrum, messenger cho làn
+  Base) và chạy `EthNetworkState` đầu-cuối: khoá → Settled cộng thanh khoản; khoá →
+  Cancelled → hoàn đúng một note; Open → chi → chặn chi lần hai và chặn huỷ sau khi chi;
+  huỷ sai secret; thiếu thanh khoản rồi nạp thêm; retry; làn sai.
+
+Nhờ đó `EthNetworkState` từ **0/124 dòng** lên **114/124** và `RollupMessageTransport`
+**16/31** dòng (chỉ còn nhánh lỗi cấu hình không dựng được trong test).
+
+### 5.4 Tổng sau khi sửa
+
+- 26 test audit PASS (12 + 7 kịch bản mới, 7 test cũ).
+- Tổng lời gọi mô hình hoá **5.242.880** = 3.145.728 (token fuzz) + 98.304 (staking
+  invariant) + 32.768 (vault fuzz) + 1.572.864 (stateful trước sửa) + **393.216**
+  (stateful trên bản đã sửa). Con số cuối là con số quan trọng: nó chạy trên đúng mã
+  nguồn sẽ deploy.
+- Phủ: **75/83 hàm, 512/586 dòng (87,4%)**; danh sách hàm chưa phủ kèm lý do ở
+  `audit/CHECKLIST.md` §5.
+- `npm test`: **22/22 PASS** trên bản đã sửa (pool, keeper, relayer, bridge, vault).
+
+## 6. Khoảng trống và rủi ro chưa kiểm
 
 1. **Echidna 2.4.0 chưa chạy.** Asset `echidna-2.4.0-x86_64-linux.tar.gz`
    (id `710402563`, SHA-256 `a77a90501dd6269e12807156e9d409b160ce0c87fbb36fe323a896a4fb7a2d1d`)
@@ -168,11 +251,16 @@ chỉ "khó tính" chặn được lô (người nhận do chính người nạp
    Các tính chất của pool chỉ được kiểm bằng fuzz + lập luận số học.
 4. **Verifier STARK** không được kiểm: mọi proof trong test là fixture băm `words`.
    Không có kết luận về âm thanh (soundness) của giao thức.
-5. **Cross-lane**: `EthNetworkState` chỉ được kiểm bằng fixture transport; chưa có
-   kiểm thử fuzz nhiều chain thật.
+5. **Cross-lane**: `EthNetworkState` đã có 7 kịch bản đầu-cuối với transport fixture
+   (114/124 dòng), nhưng **chưa** fuzz nhiều chain thật và chưa kiểm bridge thật
+   (Arbitrum/Base). `NativeStark` (0/35 dòng) và `EthPoolVerified._verifyNote` chỉ chạm
+   tới ở nhánh deploy thật, không chạy trong Foundry.
 6. **Chưa kiểm**: `research/stark256`, JS relayer/worker, app UI.
 
-## 6. Tái lập
+## 7. Tái lập
 
-Xem `audit/README.md`. Toàn bộ seed, số ca và lệnh chính xác nằm ở đó; seed fuzz mặc
-định `0x4a554e4532303236`, chain ID 31337, solc 0.8.24 (Paris), optimizer 200.
+Xem `audit/README.md` (lệnh, seed, cấu hình) và `audit/CHECKLIST.md` (map phát hiện →
+bản sửa → bài test, bảng phủ, điều kiện merge). Seed fuzz mặc định `0x4a554e4532303236`,
+chain ID 31337, solc 0.8.24 (Paris), optimizer 200. Chiến dịch stateful đầy đủ dùng
+`FOUNDRY_PROFILE=stateful` (512 × 128, `fail_on_revert = false`) vì mục tiêu dùng chung
+với Medusa/Echidna phơi cả hợp đồng thật, nơi lời gọi ngẫu nhiên revert theo thiết kế.

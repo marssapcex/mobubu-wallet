@@ -18,3 +18,11 @@ seed = "0x4a554e4532303236"
 runs = 128
 depth = 64
 fail_on_revert = true
+
+# The Medusa/Echidna target deliberately exposes the deployed pool and staking
+# contracts as call targets too; random direct calls into them revert by design.
+# This profile is only for the stateful property campaign.
+[profile.stateful.invariant]
+fail_on_revert = false
+runs = 512
+depth = 128

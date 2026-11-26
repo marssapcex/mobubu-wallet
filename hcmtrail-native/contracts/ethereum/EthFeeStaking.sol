@@ -140,8 +140,10 @@ contract EthFeeStaking {
     }
 
     function _fundFees(uint256 amount) private {
-        // The lifetime bound ensures all scaled values, including the sum of every
-        // index increment, fit in 256 bits even with only one unit of stake.
+        // fundedWei is capped at 2^128, so every scaled accumulation stays far from
+        // the 256-bit edge for any realistic stake. The theoretical worst case (one
+        // wei of stake plus fees at the cap) is economically unreachable; checked
+        // arithmetic would revert rather than corrupt the ledger.
         if (amount == 0 || amount > type(uint128).max - fundedWei) revert InvalidAmount();
         _roll();
         fundedWei += uint128(amount);

@@ -47,10 +47,19 @@ FOUNDRY_INVARIANT_RUNS=1024 FOUNDRY_INVARIANT_DEPTH=96 \
   ./build/audit/bin/forge test --offline --use "$PWD/build/audit/bin/solc" \
   --match-contract '^StakingInvariantTest$' --fuzz-runs 32768 --summary
 
-# 3. Bất biến "stateful" dùng chung với Medusa/Echidna
-FOUNDRY_INVARIANT_RUNS=2048 FOUNDRY_INVARIANT_DEPTH=128 FOUNDRY_INVARIANT_FAIL_ON_REVERT=false \
-  ./build/audit/bin/forge test --offline --use "$PWD/build/audit/bin/solc" \
-  --match-contract '^StatefulInvariantTest$' --summary
+# 3. Bất biến "stateful" dùng chung với Medusa/Echidna (bản đã sửa F-1)
+#    profile `stateful` = 512 chuỗi × 128 bước, fail_on_revert = false vì mục tiêu
+#    phơi cả hợp đồng thật, nơi lời gọi ngẫu nhiên revert theo thiết kế.
+FOUNDRY_PROFILE=stateful ./build/audit/bin/forge test --offline \
+  --use "$PWD/build/audit/bin/solc" --match-contract '^StatefulInvariantTest$' --summary
+
+# 3b. Toàn bộ campaign audit (26 test, gồm 12 kịch bản "deep" + 7 kịch bản cross-lane)
+./build/audit/bin/forge test --offline --use "$PWD/build/audit/bin/solc" --threads 1 \
+  --no-match-contract '^StatefulInvariantTest$' --summary
+
+# 3c. Phủ dòng/hàm cho contracts/ethereum + contracts/vault
+./build/audit/bin/forge coverage --offline --use "$PWD/build/audit/bin/solc" --threads 1 \
+  --report lcov --report-file /tmp/audit-lcov.info --no-match-contract '^StatefulInvariantTest$'
 
 # 4. Halmos
 PATH="$PWD/build/audit/bin:$PWD/build/audit/halmos-venv/bin:$PATH" \
@@ -75,6 +84,14 @@ echidna build/audit/medusa-target/StatefulProperties.sol --config audit/echidna.
 - `solidity/StatefulProperties.sol` — mục tiêu Medusa/Echidna dùng chung.
 - `solidity/StatefulInvariant.t.sol` — chạy chính mục tiêu đó bằng Forge + smoke test.
 - `solidity/PoolSymbolic.t.sol` — test Halmos cho quy tắc phí (bị chặn ở `setUp`).
+- `solidity/DeepScenarios.t.sol` — 12 kịch bản nhiều điều kiện đồng thời (lô đầy, round
+  cũ hết hạn, người nhận từ chối, cap rebate, biên kỳ, bỏ kỳ, vé 1 wei, phí biên, nạp
+  nhiều note, rút trực tiếp). Đây là lớp chống hồi quy cho F-1 và các luật kế toán.
+- `solidity/NetworkScenarios.t.sol` — 7 kịch bản cross-lane trên transport thật
+  (`LocalMessageTransport` + bridge/outbox): khoá → Settled, khoá → Cancelled → hoàn,
+  Open → chi, huỷ theo secret, thiếu thanh khoản, retry, làn sai.
+- `CHECKLIST.md` — map **phát hiện → bản sửa → bài test → bảng phủ → điều kiện merge**;
+  đây là thứ phải cập nhật khi thêm/bớt phát hiện.
 - `medusa.json`, `echidna.yaml` — cấu hình chiến dịch.
 
 Không có test nào trong đây chứng minh tính đúng của STARK: verifier được

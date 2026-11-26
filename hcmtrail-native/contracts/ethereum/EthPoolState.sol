@@ -221,9 +221,13 @@ abstract contract EthPoolState is NativeNoteDepositsCore {
     function _openOrJoin(BatchTerms calldata terms) private returns (Batch storage b) {
         uint64 last = latestRound[terms.amount];
         Batch storage previous = batches[terms.amount][last];
-        bool live = !previous.paid && block.timestamp < previous.expiresAt;
+        // A queue that is already full can no longer accept reservations, so it must
+        // not keep the next round closed until settlement or expiry. Without this the
+        // amount stays locked for up to BATCH_LIFETIME after the target is reached.
+        bool full = previous.target != 0 && previous.entries.length == previous.target;
+        bool live = !previous.paid && !full && block.timestamp < previous.expiresAt;
         if (live) {
-            if (terms.round != last || terms.target != previous.target || previous.entries.length == previous.target) {
+            if (terms.round != last || terms.target != previous.target) {
                 revert InvalidBatch();
             }
             return previous;
