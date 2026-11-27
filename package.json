@@ -1,0 +1,30 @@
+{
+  "name": "hcmtrail",
+  "version": "1.0.0",
+  "description": "hcmtrail ETH-only note pools, prefunded payouts and monthly staking",
+  "scripts": {
+    "test": "npm --prefix hcmtrail-native test",
+    "pool:eth": "node scripts/eth-pool-preview.mjs",
+    "pool:eth:legacy": "node scripts/eth-pool-preview.mjs --legacy-devnet",
+    "pool:eth:relayer:lab": "node scripts/eth-pool-preview.mjs --legacy-devnet --hcmt-relayer"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/marssapcex/mobubu-wallet.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/marssapcex/mobubu-wallet/issues"
+  },
+  "homepage": "https://github.com/marssapcex/mobubu-wallet#readme",
+  "dependencies": {
+    "ethers": "6.17.0"
+  },
+  "type": "module",
+  "private": true,
+  "engines": {
+    "node": ">=22.13.0"
+  }
+}

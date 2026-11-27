@@ -1,0 +1,76 @@
+{
+  "fuzzing": {
+    "workers": 2,
+    "workerResetLimit": 50,
+    "timeout": 0,
+    "testLimit": 2000000,
+    "shrinkLimit": 1000,
+    "callSequenceLength": 40,
+    "pruneFrequency": 5,
+    "corpusDirectory": "",
+    "coverageEnabled": true,
+    "coverageFormats": ["lcov"],
+    "revertReporterEnabled": true,
+    "targetContracts": ["StatefulProperties"],
+    "predeployedContracts": {},
+    "targetContractsBalances": [],
+    "constructorArgs": {},
+    "deployerAddress": "0x30000",
+    "senderAddresses": ["0x10000", "0x20000", "0x30000"],
+    "blockNumberDelayMax": 60480,
+    "blockTimestampDelayMax": 2592000,
+    "transactionGasLimit": 12500000,
+    "testing": {
+      "stopOnFailedTest": true,
+      "stopOnFailedContractMatching": true,
+      "stopOnNoTests": true,
+      "testAllContracts": false,
+      "verbosity": 1,
+      "assertionTesting": {
+        "enabled": true,
+        "panicCodeConfig": {
+          "failOnCompilerInsertedPanic": false,
+          "failOnAssertion": true
+        }
+      },
+      "propertyTesting": {
+        "enabled": true,
+        "testPrefixes": ["property_"]
+      },
+      "optimizationTesting": {
+        "enabled": false,
+        "testPrefixes": ["optimize_"]
+      }
+    },
+    "chainConfig": {
+      "codeSizeCheckDisabled": true,
+      "cheatCodes": {
+        "cheatCodesEnabled": true,
+        "enableFFI": false
+      },
+      "skipAccountChecks": true,
+      "forkConfig": {
+        "forkModeEnabled": false,
+        "rpcUrl": "",
+        "rpcBlock": 1,
+        "poolSize": 20
+      }
+    }
+  },
+  "compilation": {
+    "platform": "solc",
+    "platformConfig": {
+      "target": "./StatefulProperties.sol"
+    }
+  },
+  "slither": {
+    "useSlither": false,
+    "cachePath": "",
+    "args": []
+  },
+  "logging": {
+    "level": "info",
+    "logDirectory": "",
+    "noColor": true
+  }
+}

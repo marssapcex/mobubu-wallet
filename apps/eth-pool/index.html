@@ -1,0 +1,165 @@
+<!doctype html>
+<html lang="vi">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#0b1210">
+  <title>hcmtrail · ETH Pool &amp; Staking</title>
+  <link rel="stylesheet" href="./pool.css">
+  <script type="importmap">{"imports":{"ethers":"/ethers.mjs"}}</script>
+  <script type="module" src="./pool.mjs"></script>
+</head>
+<body>
+  <header class="shell topbar">
+    <div class="brand">
+      <span class="brand-icon" aria-hidden="true"><svg viewBox="0 0 32 32" width="26" height="26" fill="none"><path d="M16 3 26 16 16 29 6 16 16 3Z" stroke="currentColor" stroke-width="1.3"/><path d="m16 9 5 7-5 7-5-7 5-7Z" fill="currentColor" opacity=".8"/><path d="M2 16h28M16 3v26" stroke="currentColor" stroke-width="1" opacity=".65"/></svg></span>
+      <div><strong>hcmtrail</strong><small>ETH POOL</small></div>
+    </div>
+    <div class="network-tools">
+      <div id="network-status" class="network"><i></i> Đang kết nối lab</div>
+      <select id="network-select" aria-label="Chọn mạng ETH thử" disabled>
+        <option value="ethereum">Ethereum</option><option value="base">Base</option><option value="arbitrum">Arbitrum One</option>
+      </select>
+    </div>
+  </header>
+  <main class="shell">
+    <section class="hero" aria-labelledby="title">
+      <div class="hero-copy">
+        <p class="kicker"><span></span> BA MẠNG · CHỈ ETH</p>
+        <h1 id="title">Nạp ETH. <em>Rút ETH.</em></h1>
+        <p class="lead">Dùng khóa note để rút ETH tại Ethereum, Base hoặc Arbitrum One. Rút liên mạng dùng thanh khoản sẵn có ở đích. Phí nạp và rút đều 0,09%.</p>
+      </div>
+      <div class="hero-stats" aria-label="Trạng thái pool">
+        <span class="caption">ETH TRONG NOTE &amp; LÔ</span>
+        <strong id="total-eth" class="num">— <small>ETH</small></strong>
+        <span id="reserved-eth" class="subtle">Đang đọc số dư hợp đồng</span>
+      </div>
+    </section>
+    <p class="notice"><span class="notice-icon" aria-hidden="true">i</span> <span><b>Chỉ dùng ETH thử.</b> Devnet legacy chạy NotBefore A (~80,1 bit cổ điển theo upstream). Bản phát hành yêu cầu ≥256 bit cổ điển và phân tích lượng tử riêng. Không gửi tiền thật hay dùng note thật.</span></p>
+    <div class="workspace">
+      <section class="card form-card" aria-label="Thao tác pool">
+        <div class="tabs" role="tablist" aria-label="Chọn thao tác">
+          <button id="tab-deposit" class="tab" type="button" role="tab" aria-selected="true" aria-controls="operation-panel">Nạp</button>
+          <button id="tab-solo" class="tab" type="button" role="tab" aria-selected="false" aria-controls="operation-panel" tabindex="-1">Rút ngay</button>
+          <button id="tab-smart" class="tab" type="button" role="tab" aria-selected="false" aria-controls="operation-panel" tabindex="-1">Rút thông minh</button>
+        </div>
+        <div id="operation-panel" class="panel" role="tabpanel" aria-labelledby="tab-deposit">
+          <form id="operation" autocomplete="off">
+            <div class="section-heading">
+              <div><p class="caption" id="form-kicker">NẠP VÀO POOL</p><h2 id="form-title">Nạp ETH</h2></div>
+              <span class="asset"><span aria-hidden="true">♦</span> ETH</span>
+            </div>
+            <div id="deposit-fields">
+              <label for="deposit-amount">Số ETH muốn nạp</label>
+              <div class="input-unit"><input id="deposit-amount" inputmode="decimal" placeholder="0,00" maxlength="79"><span>ETH</span></div>
+              <p class="hint" id="deposit-quote" aria-live="polite">Tối thiểu 0,01 ETH trước phí. Phí 0,09% vào staking; gas thử trả riêng.</p>
+            </div>
+            <div id="withdraw-fields" hidden>
+              <label for="note-key">Khóa note</label>
+              <div class="input-pair">
+                <input id="note-key" type="password" inputmode="text" autocomplete="off" spellcheck="false" autocapitalize="off" placeholder="hceth3.…" aria-describedby="note-status">
+                <button id="import-key" class="secondary" type="button">Mở khóa</button>
+              </div>
+              <p class="hint" id="note-status">Khóa chỉ được đọc trên thiết bị; không nhập private key của ví.</p>
+              <details class="alternate"><summary>Hoặc mở file note</summary>
+                <label for="note-file">File note (JSON)</label><input id="note-file" type="file" accept=".json,application/json" aria-describedby="note-status">
+              </details>
+              <div id="destination-fields" hidden>
+                <label for="destination-select">Mạng nhận ETH <span id="source-lane"></span></label>
+                <select id="destination-select" aria-describedby="destination-hint" disabled></select>
+                <p id="destination-hint" class="hint">Rút cùng mạng từ số dư note.</p>
+              </div>
+              <label id="relay-choice" class="relay-choice" hidden><input type="checkbox" id="use-relayer" checked> Gửi qua relayer HCMT (không thêm phí)</label>
+              <label id="recipient-label" for="recipient">Địa chỉ nhận ETH</label>
+              <input id="recipient" class="address" placeholder="0x…" maxlength="42" spellcheck="false" autocapitalize="off">
+              <p class="hint" id="recipient-hint">Dùng địa chỉ mới mà bạn kiểm soát.</p>
+              <label id="withdraw-label" for="withdraw-amount">Số ETH rút <span>· không bắt buộc</span></label>
+              <div class="input-unit"><input id="withdraw-amount" inputmode="decimal" maxlength="79" placeholder="Toàn bộ số dư"><span>ETH</span></div>
+              <p class="hint" id="withdraw-amount-hint">Để trống để dùng toàn bộ note. Địa chỉ nhận được số ETH sau phí 0,09%.</p>
+              <div id="batch-fields" hidden>
+                <label for="target">Số địa chỉ trong lô</label>
+                <input id="target" inputmode="numeric" maxlength="3" value="5" aria-describedby="batch-hint">
+                <p class="hint" id="batch-hint">Từ 5 đến 100 lượt. Nếu mức ETH đã mở lô, bạn tham gia lô đó.</p>
+                <button type="button" id="clear-selection" class="link-button" hidden>Chọn mức ETH khác</button>
+              </div>
+              <div id="recoveries" hidden><p class="caption">LƯỢT ĐÃ GIỮ CHỖ TRONG NOTE</p><div id="recovery-rows"></div></div>
+              <div id="route-recoveries" hidden>
+                <p class="caption">RÚT LIÊN MẠNG · TRONG KHÓA NOTE NÀY</p>
+                <div id="route-rows"></div>
+              </div>
+            </div>
+            <button type="submit" class="primary" id="primary" disabled>Tạo note nạp <span aria-hidden="true">↗</span></button>
+          </form>
+          <div class="review" id="review" hidden>
+            <p class="caption">BƯỚC XÁC NHẬN</p>
+            <h2 id="review-title"></h2>
+            <p id="review-summary"></p>
+            <p class="note-warning"><b>Giữ khóa note ở nơi riêng trước khi xác nhận.</b> Ai có khóa hoặc file note đều có thể rút. Không gửi khóa cho người khác.</p>
+            <button type="button" class="secondary" id="copy-note">Sao chép khóa note <span aria-hidden="true">↗</span></button>
+            <textarea id="review-key" aria-label="Khóa note để sao lưu" rows="3" readonly hidden></textarea>
+            <button type="button" class="link-button" id="saved-key" hidden>Đã lưu khóa ở nơi riêng</button>
+            <button type="button" class="link-button" id="download-note">Tải file note thay thế ↓</button>
+            <button type="button" class="primary" id="confirm" disabled></button>
+            <button type="button" class="link-button" id="discard">Quay lại</button>
+          </div>
+          <p class="feedback" id="feedback" role="status" aria-live="polite" hidden></p>
+          <button type="button" class="link-button" id="cancel-proof" hidden>Hủy tạo proof</button>
+          <button type="button" class="secondary" id="continue" hidden>Tạo proof cho phần còn lại <span aria-hidden="true">↗</span></button>
+        </div>
+        <div class="card-foot"><span aria-hidden="true">◈</span> Proof STARK được tạo trên thiết bị này.</div>
+      </section>
+      <section class="card queue-card" aria-labelledby="queue-title">
+        <div class="queue-head">
+          <div><p class="caption">RÚT THÔNG MINH</p><h2 id="queue-title">Hàng đợi chi trả</h2></div>
+          <span id="block-status" class="live"><i></i> ĐANG ĐỌC</span>
+        </div>
+        <div class="queue-meta"><span><b id="batches-count">—</b> lô đang hoạt động</span><button type="button" class="link-button" id="new-batch">+ Tạo lô</button></div>
+        <div id="queue" class="queue" aria-label="Các lô theo mức ETH">
+          <div class="empty"><strong>Đang đọc trạng thái lô</strong><p>Hàng đợi phản ánh các lượt đã được xác minh trên devnet.</p></div>
+        </div>
+        <div id="recent" class="recent" hidden><p class="caption">VỪA CHI TRẢ</p><div id="recent-rows"></div></div>
+        <div class="queue-foot"><b>Khi đủ lượt:</b> keeper gửi một giao dịch trả cả lô. Nếu hết hạn trước khi trả, mở note đã lưu để hoàn về note riêng.</div>
+      </section>
+    </div>
+    <section class="card staking-card" aria-labelledby="staking-title">
+      <div class="queue-head">
+        <div><p class="caption">PHÍ GIAO THỨC · KỲ 30 NGÀY</p><h2 id="staking-title">Staking nhận ETH</h2></div>
+        <span id="staking-epoch" class="live"><i></i> ĐANG ĐỌC</span>
+      </div>
+      <div class="staking-content">
+        <div class="staking-stats">
+          <div><span class="caption">PHÍ CHỜ CHIA</span><strong id="staking-pot">— ETH</strong></div>
+          <div><span class="caption">STAKE ĐANG TÍNH</span><strong id="stake-active">—</strong></div>
+          <div><span class="caption">THƯỞNG CÓ THỂ NHẬN</span><strong id="claimable">— ETH</strong></div>
+        </div>
+        <p class="hint" id="staking-date">Mỗi mạng có hợp đồng và quỹ phí riêng.</p>
+        <p class="hint">Mỗi kỳ 30 ngày, phí ETH chia theo tỷ lệ token đang stake, không tính token giữ trong ví. Thay đổi stake có hiệu lực từ kỳ sau; có thể nhận dồn nhiều kỳ.</p>
+        <p class="hint" id="staking-token-note">Chỉ dùng token thử.</p>
+        <p class="hint" id="relayer-policy" hidden></p>
+        <button class="secondary" type="button" id="open-staking" disabled>Tạo ví staking thử <span aria-hidden="true">↗</span></button>
+        <div id="staking-user" hidden>
+          <p class="hint">Ví thử: <code id="stake-account">—</code> · <b id="stake-balance">—</b> <span id="stake-symbol"></span> còn dùng được.</p>
+          <p class="hint" id="stake-pending">—</p>
+          <div class="staking-forms">
+            <div>
+              <label id="stake-amount-label" for="stake-amount">Số token</label><input id="stake-amount" inputmode="decimal" maxlength="60" placeholder="10">
+              <div class="staking-actions">
+                <button type="button" class="secondary" id="stake-add">Stake</button>
+                <button type="button" class="secondary" id="stake-exit">Yêu cầu rút token</button>
+              </div>
+              <button type="button" class="link-button" id="stake-withdraw">Nhận lại token đã mở khóa</button>
+            </div>
+            <div>
+              <label for="claim-recipient">Địa chỉ nhận thưởng <span>· tùy chọn</span></label><input id="claim-recipient" maxlength="42" placeholder="Trống: nhận vào ví thử" spellcheck="false">
+              <button type="button" class="primary" id="claim-rewards">Nhận thưởng ETH <span aria-hidden="true">↗</span></button>
+            </div>
+          </div>
+        </div>
+        <p class="feedback" id="staking-feedback" role="status" hidden></p>
+      </div>
+    </section>
+    <details class="details"><summary>Phạm vi riêng tư và địa chỉ hợp đồng</summary><p>Số ETH, tuyến rút, địa chỉ nhận và thời điểm giao dịch vẫn công khai. Rút liên mạng gửi thông điệp xác thực, không chở ETH qua các chặng. Lượt trong lô không đồng nghĩa với số người độc lập. Dùng ví nạp để nhận lại hoặc rút số tiền dễ nhận ra có thể làm lộ liên kết. STARK ở đây chưa được kiểm toán hay chứng nhận an toàn hậu lượng tử.</p><p>Pool: <code id="pool-address">—</code> · Staking: <code id="staking-address">—</code> · Token <span id="stake-token-symbol">stake</span>: <code id="stake-token-address">—</code>. Dữ liệu bị xóa khi devnet khởi động lại.</p><p><a id="source" href="./prover-source.tar.gz" hidden>Mã nguồn trình tạo proof (AGPL)</a></p></details>
+  </main>
+  <footer class="shell footer"><strong>hcmtrail</strong><span>Ba EVM lab · ETH thử · Không dùng tiền thật</span></footer>
+</body>
+</html>

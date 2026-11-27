@@ -1,0 +1,86 @@
+import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import { test } from 'node:test';
+import { hexlify, keccak256, parseEther, randomBytes, toBeHex } from 'ethers';
+import { ARBITRUM, ETHEREUM, Stage, exitLeg } from '../pool/clearing.mjs';
+import { localClearing } from '../pool/local-clearing.mjs';
+import { startLabRelayer } from '../pool/relayer.mjs';
+import { ETH, decodeNoteKey, encodeNoteKey, parseProver, prepareProof, privateBackup, quoteFee, readBackup, validateProof } from '../pool/protocol.mjs';
+import { readPool } from '../pool/view.mjs';
+import { proveInWasm } from '../pool/wasm.mjs';
+import * as codec from '../testnet/notes.mjs';
+import { balances, hopBid, labs, opts, sent } from './message-driver.mjs';
+
+test('Arbitrum → Ethereum: pinned verifier, real WASM STARK, HCMT relayer and exact payout', { timeout: 1_800_000 }, async (t) => {
+  const wasm = readFileSync(new URL('../build/eth-pool/prover.wasm', import.meta.url));
+  const cache = process.env.POOL_PERIODIC_CACHE ? readFileSync(process.env.POOL_PERIODIC_CACHE) : undefined;
+  const chains = await labs(t, { verify: true });
+  const src = chains.get(ARBITRUM), dst = chains.get(ETHEREUM);
+  const realm = await src.pool.networkDomain();
+  for (const v of chains.values()) {
+    assert.equal(await v.pool.networkDomain(), realm);
+    v.config = { networkDomain: realm };
+    v.write = (fn) => fn(); // Sequential test; no parallel submissions.
+    v.relay = v.other;
+  }
+  const { staking, token, provider } = dst;
+  const operator = dst.other;
+  const stake = await staking.MIN_RELAY_STAKE();
+  await sent(token.transfer, operator.address, stake);
+  await sent(token.connect(operator).approve, staking.target, stake);
+  await sent(staking.connect(operator).stake, stake);
+  await provider.send('evm_setNextBlockTimestamp', [Number(await staking.start() + await staking.PERIOD())]);
+  await provider.send('evm_mine', []);
+  dst.payoutRelayer = await startLabRelayer({ pool: dst.pool, staking, signer: operator, write: dst.write });
+  const clearing = localClearing(chains, hopBid(ETHEREUM, ARBITRUM));
+  const value = parseEther('1') + 17n;
+  const dep = quoteFee(value);
+  const note = codec.openNote(ETH, dep.net);
+  const ctx = { chainId: '31338', pool: src.pool.target, domain: await src.pool.domain() };
+  const key = encodeNoteKey(privateBackup(ctx, [note]));
+  await (await src.pool.deposit(note.ownerCommit, { ...opts, value })).wait();
+  const pot = parseEther('2');
+  await (await dst.pool.fundLiquidity({ ...opts, value: pot })).wait();
+  const [opened] = readBackup(decodeNoteKey(key), ctx, codec).notes;
+  const gross = opened.value, recipient = toBeHex(0xc5ea1n, 20);
+  const order = { source: ARBITRUM, destination: ETHEREUM, gross, recipient,
+    refundOwner: codec.openNote(ETH, gross).ownerCommit, cancelHash: keccak256(randomBytes(32)), salt: hexlify(randomBytes(32)) };
+  const tree = await readPool(src.pool, src.provider, src.fromBlock, { snapshot: true });
+  assert.equal(codec.rebuildRoot(tree.leaves), tree.root);
+  const plan = prepareProof(codec, tree, { note: opened, index: tree.leaves.indexOf(opened.leaf) }, exitLeg(ctx.domain, realm, order));
+  console.log('Nạp Arbitrum lab đã xác nhận, 100 HCMT đã hiệu lực ở L1; đang tạo proof WASM.');
+  const started = performance.now();
+  const raw = await proveInWasm(wasm, plan, { cache });
+  const seconds = ((performance.now() - started) / 1000).toFixed(1);
+  const { proof, spend, change } = validateProof(codec, plan, raw.proof, parseProver(raw.publicAndChange));
+  assert.equal(change.length, 0);
+  const gas = clearing.openingGas(src, order);
+  assert.equal(gas.value, 0n);
+  const lock = await sent(src.pool.withdrawAcross, proof, spend, order, gas.packetGas);
+  const id = clearing.recordLock(src, lock);
+  assert.equal((await balances(src)).outbound, gross);
+  assert.equal(await provider.getBalance(recipient), 0n);
+  assert.equal(await staking.relayCredit(operator.address), 0n);
+  const v = await clearing.advance(src, id);
+  assert.equal(v.issue, undefined);
+  assert.equal(v.destinationStage, Stage.Paid);
+  assert.equal(v.sourceStage, Stage.Settled);
+  const receipt = await provider.getTransactionReceipt(v.payoutTx);
+  assert.equal(receipt.from, operator.address);
+  assert.equal(receipt.status, 1);
+  const wd = quoteFee(gross), reward = wd.fee / 2n;
+  assert.equal(await provider.getBalance(recipient), wd.net);
+  assert.equal((await balances(dst)).liquidity, pot - gross);
+  assert.equal(await staking.relayCredit(operator.address), reward);
+  assert.equal(await staking.fundedWei(), wd.fee - reward);
+  assert.equal(await provider.getBalance(staking.target), wd.fee);
+  assert.equal(await src.staking.fundedWei(), dep.fee);
+  assert.equal(await src.staking.relayFundedWei(), 0n);
+  assert.equal((await balances(src)).outbound, 0n);
+  assert.equal((await balances(src)).liquidity, gross);
+  await clearing.advance(src, id);
+  assert.equal(await staking.relayCredit(operator.address), reward);
+  assert.equal(await provider.getBalance(recipient), wd.net);
+  t.diagnostic(`${value} → ${gross} → ${wd.net} wei; L1 fee ${wd.fee} wei, ${reward} to relayer credit; ` +
+    `${(proof.length - 2) / 2} bytes in ${seconds} s; ${lock.gasUsed} gas lock, ${receipt.gasUsed} gas L1 payout`);
+});

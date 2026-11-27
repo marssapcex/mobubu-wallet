@@ -1,0 +1,39 @@
+{
+  "name": "hcmtrail-eth-pool-lab",
+  "version": "0.1.0",
+  "description": "ETH note pools with prefunded payouts, monthly fee staking, and STARK research",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22.13.0"
+  },
+  "scripts": {
+    "build": "node scripts/build-vault.mjs",
+    "test": "node --test test/eth-pool.test.mjs test/eth-fee-staking.test.mjs test/hcmt.test.mjs test/eth-relayer.test.mjs test/eth-clearing.test.mjs test/stark256.test.mjs",
+    "build:pool": "node scripts/build-vault.mjs --pool",
+    "build:pool:wasm": "bash scripts/build-pool-wasm.sh",
+    "test:pool": "node --test test/eth-pool.test.mjs",
+    "test:pool:fresh": "node --test test/eth-pool-fresh.test.mjs",
+    "build:pool:legacy": "node scripts/build-vault.mjs --pool-legacy-devnet",
+    "build:pool:legacy:wasm": "bash scripts/build-pool-wasm.sh --legacy-devnet",
+    "build:pool:256": "node scripts/build-vault.mjs --pool-256",
+    "report:pool:256": "node scripts/pool-stark256-report.mjs",
+    "test:pool:256": "node --test test/stark256.test.mjs",
+    "test:relayer": "node --test test/eth-relayer.test.mjs",
+    "test:relayer:fresh": "node --test test/eth-relayer-fresh.test.mjs",
+    "test:hcmt": "node --test test/hcmt.test.mjs",
+    "test:staking": "node --test test/eth-fee-staking.test.mjs",
+    "test:pool:key": "node --test test/eth-key-fresh.test.mjs",
+    "test:routes": "node --test test/eth-clearing.test.mjs",
+    "test:routes:fresh": "node --test test/eth-clearing-fresh.test.mjs",
+    "test:prover:browser": "node --test test/prover-browser.test.mjs"
+  },
+  "devDependencies": {
+    "@nomicfoundation/edr": "0.25.1",
+    "ethers": "6.17.0",
+    "solc": "0.8.24"
+  },
+  "overrides": {
+    "tmp": "0.2.7"
+  }
+}
